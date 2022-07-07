@@ -1,0 +1,39 @@
+# you can use http://editor.swagger.io to view and validate your API doc
+swagger: '2.0'
+info:
+  title: Hello-World Path API service
+  version: "1.0"
+produces:
+  - application/json
+  
+paths:
+  /hello-world:
+    get:
+      description:
+        Return Hello-world message from web service
+      tags:
+        - Hello-World
+      responses:
+        200:
+          description: a hello-world message
+          schema:
+            $ref: '#/definitions/Response'
+        default:
+         description: general error
+         schema:
+           $ref: '#/definitions/Error'
+           
+definitions:
+  Response:
+    type: object
+    properties:
+      message:
+        type: string
+  Error:
+    type: object
+    properties:
+      code:
+        type: integer
+        format: int32
+      message:
+        type: string
