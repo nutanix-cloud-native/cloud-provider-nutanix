@@ -1,0 +1,23 @@
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: nutanix-config
+  namespace: kube-system
+data:
+  nutanix_config.json: |-
+    {
+      "prismCentral": {
+        "address": "${NUTANIX_ENDPOINT}",
+        "port": ${NUTANIX_PORT},
+        "insecure": ${NUTANIX_INSECURE},
+        "credentialRef": {
+          "kind": "secret",
+          "name": "nutanix-creds"
+        }
+      },
+      "topologyCategories": {
+        "region": "${NUTANIX_REGION_CATEGORY}",
+        "zone": "${NUTANIX_ZONE_CATEGORY}"
+      }
+    }

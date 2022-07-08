@@ -12,9 +12,9 @@ import (
 	cliflag "k8s.io/component-base/cli/flag"
 	"k8s.io/klog/v2"
 
-	_ "github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider" // for "nutanix" provider registration
-	_ "k8s.io/component-base/metrics/prometheus/clientgo"                   // for client metric registration
-	_ "k8s.io/component-base/metrics/prometheus/version"                    // for version metric registration
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider"
+	_ "k8s.io/component-base/metrics/prometheus/clientgo" // for client metric registration
+	_ "k8s.io/component-base/metrics/prometheus/version"  // for version metric registration
 )
 
 func main() {
@@ -22,36 +22,18 @@ func main() {
 	if err != nil {
 		klog.Fatalf("unable to initialize command options: %v", err)
 	}
+	ccmOptions.KubeCloudShared.CloudProvider.Name = provider.ProviderName
 
 	fss := cliflag.NamedFlagSets{}
+
+	controllerInitializers := app.DefaultInitFuncConstructors
+	delete(controllerInitializers, "service")
+	delete(controllerInitializers, "route")
+
 	command := app.NewCloudControllerManagerCommand(ccmOptions,
-		cloudInitializer, controllerInitializers(), fss, wait.NeverStop)
+		cloudInitializer, controllerInitializers, fss, wait.NeverStop)
 	code := cli.Run(command)
 	os.Exit(code)
-}
-
-// If custom ClientNames are used, as below, then the controller will not use
-// the API server bootstrapped RBAC, and instead will require it to be installed
-// separately.
-func controllerInitializers() map[string]app.ControllerInitFuncConstructor {
-	controllerInitializers := app.DefaultInitFuncConstructors
-	if constructor, ok := controllerInitializers["cloud-node"]; ok {
-		constructor.InitContext.ClientName = "mycloud-external-cloud-node-controller"
-		controllerInitializers["cloud-node"] = constructor
-	}
-	if constructor, ok := controllerInitializers["cloud-node-lifecycle"]; ok {
-		constructor.InitContext.ClientName = "mycloud-external-cloud-node-lifecycle-controller"
-		controllerInitializers["cloud-node-lifecycle"] = constructor
-	}
-	if constructor, ok := controllerInitializers["service"]; ok {
-		constructor.InitContext.ClientName = "mycloud-external-service-controller"
-		controllerInitializers["service"] = constructor
-	}
-	if constructor, ok := controllerInitializers["route"]; ok {
-		constructor.InitContext.ClientName = "mycloud-external-route-controller"
-		controllerInitializers["route"] = constructor
-	}
-	return controllerInitializers
 }
 
 func cloudInitializer(config *config.CompletedConfig) cloudprovider.Interface {
