@@ -10,59 +10,79 @@ import (
 	"k8s.io/klog/v2"
 )
 
-const providerName = "nutanix"
-
 type NtnxCloud struct {
-	Name string
+	name string
 
-	client clientset.Interface
-	Config Config
+	client      clientset.Interface
+	config      Config
+	manager     *nutanixManager
+	instancesV2 cloudprovider.InstancesV2
 }
 
 func init() {
-	cloudprovider.RegisterCloudProvider(providerName,
+	cloudprovider.RegisterCloudProvider(ProviderName,
 		func(config io.Reader) (cloudprovider.Interface, error) {
 			return newNtnxCloud(config)
 		})
 }
 
 func newNtnxCloud(config io.Reader) (cloudprovider.Interface, error) {
-
 	bytes, err := ioutil.ReadAll(config)
 	if err != nil {
-		klog.Infof("Error in initializing karbon cloudprovid config %q\n", err)
+		klog.Infof("Error in initializing %s cloudprovid config %q\n", ProviderName, err)
 		return nil, err
 	}
 	klog.Infoln(string(bytes))
 
-	ntnx := &NtnxCloud{
-		Name: providerName,
+	nutanixConfig := Config{}
+	err = json.Unmarshal(bytes, &nutanixConfig)
+	if err != nil {
+		return nil, err
 	}
-	err = json.Unmarshal(bytes, &ntnx.Config)
+	nutanixManager, err := newNutanixManager(nutanixConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	ntnx := &NtnxCloud{
+		name:        ProviderName,
+		config:      nutanixConfig,
+		manager:     nutanixManager,
+		instancesV2: newInstancesV2(nutanixManager),
+	}
 
 	return ntnx, err
 }
 
 // Initialize cloudprovider
 func (nc *NtnxCloud) Initialize(clientBuilder cloudprovider.ControllerClientBuilder,
-	stopCh <-chan struct{}) {
+	stopCh <-chan struct{},
+) {
 	var err error
+	var kClient clientset.Interface
 	klog.Info("Initializing client ...")
-	nc.client, err = clientset.NewForConfig(clientBuilder.ConfigOrDie(""))
+	kClient, err = clientset.NewForConfig(clientBuilder.ConfigOrDie(""))
 	if err != nil {
 		klog.Fatal(err.Error())
 	}
+	nc.addKubernetesClient(kClient)
+
 	klog.Infof("Client initialized")
+}
+
+func (nc *NtnxCloud) addKubernetesClient(kclient clientset.Interface) {
+	nc.client = kclient
+	nc.manager.client = kclient
 }
 
 // ProviderName returns the cloud provider ID.
 func (nc *NtnxCloud) ProviderName() string {
-	return nc.Name
+	return nc.name
 }
 
 // HasClusterID returns true if the cluster has a clusterID
 func (nc *NtnxCloud) HasClusterID() bool {
-	return true // TODO need cluster ID
+	return true
 }
 
 func (nc *NtnxCloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
@@ -78,5 +98,16 @@ func (nc *NtnxCloud) Clusters() (cloudprovider.Clusters, bool) {
 }
 
 func (nc *NtnxCloud) Zones() (cloudprovider.Zones, bool) {
+	klog.Info("Zones [DEPRECATED]")
 	return nil, false
+}
+
+func (nc *NtnxCloud) Instances() (cloudprovider.Instances, bool) {
+	klog.Info("Instances [DEPRECATED]")
+	return nil, false
+}
+
+func (nc *NtnxCloud) InstancesV2() (cloudprovider.InstancesV2, bool) {
+	klog.Info("InstancesV2")
+	return nc.instancesV2, true
 }
