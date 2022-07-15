@@ -36,9 +36,14 @@ func (nc *nutanixManager) setInformers(sharedInformers informers.SharedInformerF
 	nc.sharedInformers = sharedInformers
 	nc.secretInformer = nc.sharedInformers.Core().V1().Secrets()
 	hasSynced := nc.secretInformer.Informer().HasSynced
-	stopCh := context.Background().Done()
-	if ok := cache.WaitForCacheSync(stopCh, hasSynced); !ok {
-		klog.Fatal("failed to wait for caches to sync")
+	if !hasSynced() {
+		stopCh := context.Background().Done()
+		go nc.secretInformer.Informer().Run(stopCh)
+		klog.Info("Waiting for secrets cache to sync")
+		if ok := cache.WaitForCacheSync(stopCh, hasSynced); !ok {
+			klog.Fatal("failed to wait for caches to sync")
+		}
+		klog.Info("Secrets cache synced")
 	}
 }
 
