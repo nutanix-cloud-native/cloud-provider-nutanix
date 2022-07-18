@@ -7,13 +7,13 @@ import (
 
 	prismClient "github.com/nutanix-cloud-native/prism-go-client/pkg/nutanix"
 	prismClientV3 "github.com/nutanix-cloud-native/prism-go-client/pkg/nutanix/v3"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clientset "k8s.io/client-go/kubernetes"
+	coreinformers "k8s.io/client-go/informers/core/v1"
+
 	"k8s.io/klog/v2"
 )
 
 type nutanixClientHelper struct {
-	kClient clientset.Interface
+	secretInformer coreinformers.SecretInformer
 }
 
 func (nc *nutanixClientHelper) create(config Config) (*prismClientV3.Client, error) {
@@ -61,7 +61,6 @@ func (nc *nutanixClientHelper) getPrismCentralCredentialFromConfig(config Config
 }
 
 func (nc *nutanixClientHelper) withCredentialFromRef(credentialRef *NutanixCredentialReference, credential *prismClient.Credentials) (*prismClient.Credentials, error) {
-	ctx := context.Background()
 	if credentialRef.Name == "" {
 		return nil, fmt.Errorf("name must be set on credentialRef")
 	}
@@ -69,7 +68,8 @@ func (nc *nutanixClientHelper) withCredentialFromRef(credentialRef *NutanixCrede
 	if credentialRef.Namespace != "" {
 		credentialRefnamespace = credentialRef.Namespace
 	}
-	secret, err := nc.kClient.CoreV1().Secrets(credentialRefnamespace).Get(ctx, credentialRef.Name, metav1.GetOptions{})
+
+	secret, err := nc.secretInformer.Lister().Secrets(credentialRefnamespace).Get(credentialRef.Name)
 	if err != nil {
 		return nil, err
 	}

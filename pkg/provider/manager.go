@@ -7,15 +7,21 @@ import (
 
 	prismClientV3 "github.com/nutanix-cloud-native/prism-go-client/pkg/nutanix/v3"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/informers"
+	coreinformers "k8s.io/client-go/informers/core/v1"
 	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
+
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/cloud-provider/node/helpers"
 	"k8s.io/klog/v2"
 )
 
 type nutanixManager struct {
-	client clientset.Interface
-	config Config
+	client          clientset.Interface
+	sharedInformers informers.SharedInformerFactory
+	secretInformer  coreinformers.SecretInformer
+	config          Config
 }
 
 func newNutanixManager(config Config) (*nutanixManager, error) {
@@ -24,6 +30,25 @@ func newNutanixManager(config Config) (*nutanixManager, error) {
 		config: config,
 	}
 	return m, nil
+}
+
+func (nc *nutanixManager) setInformers(sharedInformers informers.SharedInformerFactory) {
+	nc.sharedInformers = sharedInformers
+	nc.secretInformer = nc.sharedInformers.Core().V1().Secrets()
+	hasSynced := nc.secretInformer.Informer().HasSynced
+	if !hasSynced() {
+		stopCh := context.Background().Done()
+		go nc.secretInformer.Informer().Run(stopCh)
+		klog.Info("Waiting for secrets cache to sync")
+		if ok := cache.WaitForCacheSync(stopCh, hasSynced); !ok {
+			klog.Fatal("failed to wait for caches to sync")
+		}
+		klog.Info("Secrets cache synced")
+	}
+}
+
+func (nc *nutanixManager) setKubernetesClient(client clientset.Interface) {
+	nc.client = client
 }
 
 func (n *nutanixManager) getInstanceMetadata(ctx context.Context, node *v1.Node) (*cloudprovider.InstanceMetadata, error) {
@@ -131,7 +156,7 @@ func (n *nutanixManager) getTopologyCategories() TopologyCategories {
 
 func (n *nutanixManager) getNutanixClient() (*prismClientV3.Client, error) {
 	helper := nutanixClientHelper{
-		kClient: n.client,
+		secretInformer: n.secretInformer,
 	}
 	nutanixClient, err := helper.create(n.config)
 	if err != nil {
