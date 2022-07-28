@@ -14,6 +14,4 @@ const (
 	customPENameLabel   string = "nutanix.com/prism-element-name"
 	customHostUUIDLabel string = "nutanix.com/prism-host-uuid"
 	customHostNameLabel string = "nutanix.com/prism-host-name"
-
-	BasicAuthCredentialType CredentialType = "basic_auth"
 )
