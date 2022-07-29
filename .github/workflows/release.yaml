@@ -1,0 +1,67 @@
+name: Generate release artefact
+
+on:
+  # push:
+  #   tags:
+  #   - "v*.*.*"
+  workflow_dispatch:
+
+jobs:
+  build_release:
+    name: Build Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: "^1.17"
+
+      - name: Install tools
+        uses: redhat-actions/openshift-tools-installer@v1
+        with:
+          source: "github"
+          ko: "latest"
+
+      - name: Login to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ccm-nutanix
+          sep-tags: ","
+          sep-labels: ","
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
+            type=sha
+
+      - name: Build container
+        env:
+          KO_DOCKER_REPO: ghcr.io/${{ github.repository }}/controller
+          TAGS: ${{ steps.meta.outputs.tags }}
+          LABELS: ${{ steps.meta.outputs.labels }}
+          PLATFORMS: linux/amd64,linux/arm64,linux/arm
+        run: |
+          PTAGS=`echo $TAGS | sed 's/ccm-nutanix://g'`
+          export SOURCE_DATE_EPOCH=$(date +%s)
+          ko build --bare --image-label "$LABELS" -t "$PTAGS" --platform=$PLATFORMS .
+
+      - name: parse semver
+        id: semver
+        env:
+          SEMVER: ${{ steps.meta.outputs.version }}
+        run: |
+          n=${SEMVER//[!0-9]/ }
+          a=(${n//\./ })
+          echo "::set-output name=major::${a[0]}"
+          echo "::set-output name=minor::${a[1]}"
