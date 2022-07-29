@@ -5,16 +5,23 @@ import (
 	"fmt"
 	"strings"
 
-	prismClientV3 "github.com/nutanix-cloud-native/prism-go-client/pkg/nutanix/v3"
+	prismgoclient "github.com/nutanix-cloud-native/prism-go-client"
+	"github.com/nutanix-cloud-native/prism-go-client/environment"
+	kubernetesEnv "github.com/nutanix-cloud-native/prism-go-client/environment/providers/kubernetes"
+	envTypes "github.com/nutanix-cloud-native/prism-go-client/environment/types"
+	prismClientV3 "github.com/nutanix-cloud-native/prism-go-client/v3"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
-
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/cloud-provider/node/helpers"
 	"k8s.io/klog/v2"
+)
+
+var (
+	ErrEnvironmentNotReady = fmt.Errorf("Environment not initialized or ready yet")
 )
 
 type nutanixManager struct {
@@ -22,6 +29,7 @@ type nutanixManager struct {
 	sharedInformers informers.SharedInformerFactory
 	secretInformer  coreinformers.SecretInformer
 	config          Config
+	env             envTypes.Environment
 }
 
 func newNutanixManager(config Config) (*nutanixManager, error) {
@@ -30,6 +38,27 @@ func newNutanixManager(config Config) (*nutanixManager, error) {
 		config: config,
 	}
 	return m, nil
+}
+
+func (nc *nutanixManager) setupEnvironment() {
+	pc := nc.config.PrismCentral
+	prismEndpoint := kubernetesEnv.NutanixPrismEndpoint{
+		Address:  pc.Address,
+		Port:     pc.Port,
+		Insecure: pc.Insecure,
+		CredentialRef: &kubernetesEnv.NutanixCredentialReference{
+			Kind: kubernetesEnv.SecretKind,
+			Namespace: func() string {
+				if pc.CredentialRef.Namespace != "" {
+					return pc.CredentialRef.Namespace
+				}
+				return defaultCCMSecretNamespace
+			}(),
+			Name: pc.CredentialRef.Name,
+		},
+	}
+	nc.env = environment.NewEnvironment(kubernetesEnv.NewProvider(prismEndpoint,
+		nc.secretInformer))
 }
 
 func (nc *nutanixManager) setInformers(sharedInformers informers.SharedInformerFactory) {
@@ -45,6 +74,7 @@ func (nc *nutanixManager) setInformers(sharedInformers informers.SharedInformerF
 		}
 		klog.Info("Secrets cache synced")
 	}
+	nc.setupEnvironment()
 }
 
 func (nc *nutanixManager) setKubernetesClient(client clientset.Interface) {
@@ -155,13 +185,30 @@ func (n *nutanixManager) getTopologyCategories() TopologyCategories {
 }
 
 func (n *nutanixManager) getNutanixClient() (*prismClientV3.Client, error) {
-	helper := nutanixClientHelper{
-		secretInformer: n.secretInformer,
+	if n.env == nil {
+		return nil, ErrEnvironmentNotReady
 	}
-	nutanixClient, err := helper.create(n.config)
+	me, err := n.env.GetManagementEndpoint(envTypes.Topology{})
 	if err != nil {
 		return nil, err
 	}
+	creds := &prismgoclient.Credentials{
+		URL:      me.Address.Host, // Not really an URL
+		Endpoint: me.Address.Host,
+		Insecure: me.Insecure,
+		Username: me.ApiCredentials.Username,
+		Password: me.ApiCredentials.Password,
+	}
+	nutanixClient, err := prismClientV3.NewV3Client(*creds)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = nutanixClient.V3.GetCurrentLoggedInUser(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
 	return nutanixClient, nil
 }
 
