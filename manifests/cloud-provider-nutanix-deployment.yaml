@@ -2,6 +2,8 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  labels:
+    k8s-app: nutanix-cloud-controller-manager
   name: nutanix-cloud-controller-manager
   namespace: kube-system
 spec:
@@ -9,32 +11,44 @@ spec:
   selector:
     matchLabels:
       k8s-app: nutanix-cloud-controller-manager
+  strategy:
+    type: Recreate
   template:
     metadata:
       labels:
         k8s-app: nutanix-cloud-controller-manager
     spec:
+      hostNetwork: true
       priorityClassName: system-cluster-critical
       nodeSelector:
         node-role.kubernetes.io/master: ""
       serviceAccountName: cloud-controller-manager
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: "kubernetes.io/hostname"
+              labelSelector:
+                matchLabels:
+                  k8s-app: nutanix-cloud-controller-manager
       dnsPolicy: Default
       tolerations:
-        - key: "node.cloudprovider.kubernetes.io/uninitialized"
-          value: "true"
-          effect: "NoSchedule"
-        - key: "CriticalAddonsOnly"
-          operator: "Exists"
-        - key: "node-role.kubernetes.io/master"
-          effect: NoSchedule
-        - effect: NoExecute
-          key: node.kubernetes.io/not-ready
+        - effect: NoSchedule
+          key: node-role.kubernetes.io/master
           operator: Exists
-          tolerationSeconds: 300
         - effect: NoExecute
           key: node.kubernetes.io/unreachable
           operator: Exists
-          tolerationSeconds: 300
+          tolerationSeconds: 120
+        - effect: NoExecute
+          key: node.kubernetes.io/not-ready
+          operator: Exists
+          tolerationSeconds: 120
+        - effect: NoSchedule
+          key: node.cloudprovider.kubernetes.io/uninitialized
+          operator: Exists
+        - effect: NoSchedule
+          key: node.kubernetes.io/not-ready
+          operator: Exists
       containers:
         - image: $IMG
           imagePullPolicy: Always
