@@ -15,4 +15,6 @@ const (
 	CustomPENameLabel   string = "nutanix.com/prism-element-name"
 	CustomHostUUIDLabel string = "nutanix.com/prism-host-uuid"
 	CustomHostNameLabel string = "nutanix.com/prism-host-name"
+
+	PrismCentralService string = "PRISM_CENTRAL"
 )

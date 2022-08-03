@@ -1,10 +1,11 @@
 package mock
 
 const (
-	MockIP      = "1.1.1.1"
-	MockCluster = "mock-cluster"
-	MockRegion  = "mock-region"
-	MockZone    = "mock-zone"
+	MockIP           = "1.1.1.1"
+	MockCluster      = "mock-cluster"
+	MockPrismCentral = "mock-pc"
+	MockRegion       = "mock-region"
+	MockZone         = "mock-zone"
 
 	MockDefaultRegion = "region"
 	MockDefaultZone   = "zone"

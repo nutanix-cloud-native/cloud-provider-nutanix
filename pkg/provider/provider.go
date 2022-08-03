@@ -1,7 +1,7 @@
 package provider
 
 import (
-	"encoding/json"
+	"fmt"
 	"io"
 	"io/ioutil"
 
@@ -37,10 +37,9 @@ func newNtnxCloud(configReader io.Reader) (cloudprovider.Interface, error) {
 		return nil, err
 	}
 
-	nutanixConfig := config.Config{}
-	err = json.Unmarshal(bytes, &nutanixConfig)
+	nutanixConfig, err := config.NewConfigFromBytes(bytes)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error occurred while loading config file: %v", err)
 	}
 	nutanixManager, err := newNutanixManager(nutanixConfig)
 	if err != nil {

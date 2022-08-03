@@ -5,6 +5,7 @@ import (
 
 	"github.com/nutanix-cloud-native/prism-go-client/utils"
 	prismClientV3 "github.com/nutanix-cloud-native/prism-go-client/v3"
+	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
@@ -36,15 +37,27 @@ func (m *MockEnvironment) GetNode(nodeName string) *v1.Node {
 
 func (m *MockEnvironment) GetCluster(clusterName string) *prismClientV3.ClusterIntentResponse {
 	for _, v := range m.managedMockClusters {
-		if v.Spec.Name == &clusterName {
+		if *v.Spec.Name == clusterName {
 			return v
 		}
 	}
 	return nil
 }
 
+func (m *MockEnvironment) AddCluster(cluster *prismClientV3.ClusterIntentResponse) *prismClientV3.ClusterIntentResponse {
+	Expect(cluster).ToNot(BeNil())
+	m.managedMockClusters[*cluster.Metadata.UUID] = cluster
+	return nil
+}
+
+func (m *MockEnvironment) DeleteCluster(clusterUUID string) {
+	Expect(clusterUUID).ToNot(BeEmpty())
+	delete(m.managedMockClusters, clusterUUID)
+}
+
 func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockEnvironment, error) {
 	cluster := getDefaultClusterSpec(MockCluster)
+	pc := CreatePrismCentralCluster(MockPrismCentral)
 
 	clusterCategories := getDefaultClusterSpec(mockClusterCategories)
 	clusterCategories.Metadata.Categories[MockDefaultRegion] = MockRegion
@@ -114,6 +127,7 @@ func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockE
 		managedMockClusters: map[string]*prismClientV3.ClusterIntentResponse{
 			*cluster.Metadata.UUID:           cluster,
 			*clusterCategories.Metadata.UUID: clusterCategories,
+			*pc.Metadata.UUID:                pc,
 		},
 		managedNodes: map[string]*v1.Node{
 			MockVMNamePoweredOn:                  poweredOnNode,

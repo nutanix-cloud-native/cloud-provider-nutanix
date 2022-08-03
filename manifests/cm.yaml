@@ -16,8 +16,12 @@ data:
           "name": "nutanix-creds"
         }
       },
-      "topologyCategories": {
-        "region": "${NUTANIX_REGION_CATEGORY}",
-        "zone": "${NUTANIX_ZONE_CATEGORY}"
+      "enableCustomLabeling": false,
+      "topologyDiscovery": {
+        "type": "Categories",
+        "topologyCategories": {
+          "regionCategory": "${NUTANIX_REGION_CATEGORY}",
+          "zoneCategory": "${NUTANIX_ZONE_CATEGORY}"
+        }
       }
     }

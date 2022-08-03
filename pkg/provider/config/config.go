@@ -1,14 +1,40 @@
 package config
 
+import (
+	"encoding/json"
+	"fmt"
+
+	"k8s.io/klog/v2"
+)
+
 // Config of Nutanix provider
 type Config struct {
-	PrismCentral       NutanixPrismEndpoint `json:"prismCentral"`
-	TopologyCategories *TopologyCategories  `json:"topologyCategories"`
+	PrismCentral         NutanixPrismEndpoint `json:"prismCentral"`
+	TopologyDiscovery    TopologyDiscovery    `json:"topologyDiscovery"`
+	EnableCustomLabeling bool                 `json:"enableCustomLabeling"`
+}
+
+type TopologyDiscovery struct {
+	// Default type will be set to Prism via the newConfig function
+	Type               TopologyDiscoveryType `json:"type"`
+	TopologyCategories *TopologyCategories   `json:"topologyCategories"`
+}
+
+type TopologyDiscoveryType string
+
+const (
+	PrismTopologyDiscoveryType      = TopologyDiscoveryType("Prism")
+	CategoriesTopologyDiscoveryType = TopologyDiscoveryType("Categories")
+)
+
+type TopologyInfo struct {
+	Zone   string `json:"zone"`
+	Region string `json:"region"`
 }
 
 type TopologyCategories struct {
-	Zone   string `json:"zone"`
-	Region string `json:"region"`
+	ZoneCategory   string `json:"zoneCategory"`
+	RegionCategory string `json:"regionCategory"`
 }
 
 type NutanixPrismEndpoint struct {
@@ -39,4 +65,25 @@ type NutanixCredentialReference struct {
 	Name string `json:"name"`
 	// namespace of the credential.
 	Namespace string `json:"namespace"`
+}
+
+func NewConfigFromBytes(bytes []byte) (Config, error) {
+	nutanixConfig := Config{}
+	if err := json.Unmarshal(bytes, &nutanixConfig); err != nil {
+		return nutanixConfig, err
+	}
+	switch nutanixConfig.TopologyDiscovery.Type {
+	case PrismTopologyDiscoveryType:
+		return nutanixConfig, nil
+	case "":
+		klog.Warning("topology discovery type was not set. Defaulting to %s", PrismTopologyDiscoveryType)
+		nutanixConfig.TopologyDiscovery.Type = PrismTopologyDiscoveryType
+		return nutanixConfig, nil
+	case CategoriesTopologyDiscoveryType:
+		if nutanixConfig.TopologyDiscovery.TopologyCategories == nil {
+			return nutanixConfig, fmt.Errorf("topologyCategories must be set when using topology discovery type: %s", CategoriesTopologyDiscoveryType)
+		}
+		return nutanixConfig, nil
+	}
+	return nutanixConfig, fmt.Errorf("unsupported topology discovery type: %s", nutanixConfig.TopologyDiscovery.Type)
 }

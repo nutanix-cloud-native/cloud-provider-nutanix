@@ -13,4 +13,5 @@ type Client interface {
 type Prism interface {
 	GetVM(vmUUID string) (*prismClientV3.VMIntentResponse, error)
 	GetCluster(clusterUUID string) (*prismClientV3.ClusterIntentResponse, error)
+	ListAllCluster(filter string) (*prismClientV3.ClusterListIntentResponse, error)
 }
