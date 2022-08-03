@@ -1,4 +1,4 @@
-package provider
+package config
 
 // Config of Nutanix provider
 type Config struct {
