@@ -3,7 +3,10 @@ module github.com/nutanix-cloud-native/cloud-provider-nutanix
 go 1.17
 
 require (
+	github.com/google/uuid v1.1.2
 	github.com/nutanix-cloud-native/prism-go-client v0.2.1-0.20220728162452-e667703bf00c
+	github.com/onsi/ginkgo/v2 v2.1.4
+	github.com/onsi/gomega v1.19.0
 	k8s.io/api v0.24.2
 	k8s.io/apimachinery v0.24.2
 	k8s.io/client-go v0.24.2
@@ -39,7 +42,6 @@ require (
 	github.com/google/gnostic v0.5.7-v3refs // indirect
 	github.com/google/go-cmp v0.5.8 // indirect
 	github.com/google/gofuzz v1.1.0 // indirect
-	github.com/google/uuid v1.1.2 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway v1.16.0 // indirect
 	github.com/hashicorp/logutils v1.0.0 // indirect

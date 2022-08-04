@@ -9,33 +9,35 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/klog/v2"
+
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
 )
 
 type NtnxCloud struct {
 	name string
 
 	client      clientset.Interface
-	config      Config
+	config      config.Config
 	manager     *nutanixManager
 	instancesV2 cloudprovider.InstancesV2
 }
 
 func init() {
-	cloudprovider.RegisterCloudProvider(ProviderName,
+	cloudprovider.RegisterCloudProvider(constants.ProviderName,
 		func(config io.Reader) (cloudprovider.Interface, error) {
 			return newNtnxCloud(config)
 		})
 }
 
-func newNtnxCloud(config io.Reader) (cloudprovider.Interface, error) {
-	bytes, err := ioutil.ReadAll(config)
+func newNtnxCloud(configReader io.Reader) (cloudprovider.Interface, error) {
+	bytes, err := ioutil.ReadAll(configReader)
 	if err != nil {
-		klog.Infof("Error in initializing %s cloudprovid config %q\n", ProviderName, err)
+		klog.Infof("Error in initializing %s cloudprovid config %q\n", constants.ProviderName, err)
 		return nil, err
 	}
-	klog.Infoln(string(bytes))
 
-	nutanixConfig := Config{}
+	nutanixConfig := config.Config{}
 	err = json.Unmarshal(bytes, &nutanixConfig)
 	if err != nil {
 		return nil, err
@@ -46,7 +48,7 @@ func newNtnxCloud(config io.Reader) (cloudprovider.Interface, error) {
 	}
 
 	ntnx := &NtnxCloud{
-		name:        ProviderName,
+		name:        constants.ProviderName,
 		config:      nutanixConfig,
 		manager:     nutanixManager,
 		instancesV2: newInstancesV2(nutanixManager),

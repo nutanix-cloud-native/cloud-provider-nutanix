@@ -14,7 +14,8 @@ import (
 	_ "k8s.io/component-base/metrics/prometheus/version"  // for version metric registration
 	"k8s.io/klog/v2"
 
-	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider"
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
+	_ "github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider"
 )
 
 func main() {
@@ -22,7 +23,7 @@ func main() {
 	if err != nil {
 		klog.Fatalf("unable to initialize command options: %v", err)
 	}
-	ccmOptions.KubeCloudShared.CloudProvider.Name = provider.ProviderName
+	ccmOptions.KubeCloudShared.CloudProvider.Name = constants.ProviderName
 
 	fss := cliflag.NamedFlagSets{}
 
