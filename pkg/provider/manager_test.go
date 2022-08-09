@@ -12,6 +12,7 @@ import (
 
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/testing/mock"
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/interfaces"
 )
 
 var _ = Describe("Test Manager", func() {
@@ -21,6 +22,7 @@ var _ = Describe("Test Manager", func() {
 		mockEnvironment *mock.MockEnvironment
 		m               nutanixManager
 		err             error
+		nClient         interfaces.Prism
 	)
 
 	BeforeEach(func() {
@@ -29,40 +31,46 @@ var _ = Describe("Test Manager", func() {
 		mockEnvironment, err = mock.CreateMockEnvironment(ctx, kClient)
 		Expect(err).ShouldNot(HaveOccurred())
 		Expect(mockEnvironment).ToNot(BeNil())
+		nutanixClient := mock.CreateMockClient(*mockEnvironment)
+		nClient, err = nutanixClient.Get()
+		Expect(err).ToNot(HaveOccurred())
 		m = nutanixManager{
 			config: config.Config{
-				TopologyCategories: &config.TopologyCategories{
-					Region: mock.MockDefaultRegion,
-					Zone:   mock.MockDefaultZone,
+				TopologyDiscovery: config.TopologyDiscovery{
+					Type: config.CategoriesTopologyDiscoveryType,
+					TopologyCategories: &config.TopologyCategories{
+						RegionCategory: mock.MockDefaultRegion,
+						ZoneCategory:   mock.MockDefaultZone,
+					},
 				},
 			},
 			client:        kClient,
-			nutanixClient: mock.CreateMockClient(*mockEnvironment),
+			nutanixClient: nutanixClient,
 		}
 	})
 
 	Context("Test HasEmptyTopologyInfo", func() {
 		It("should detect emptyTopologyInfo", func() {
-			c := config.TopologyCategories{}
+			c := config.TopologyInfo{}
 			Expect(m.hasEmptyTopologyInfo(c)).To(BeTrue())
 		})
 
 		It("should detect empty zone", func() {
-			c := config.TopologyCategories{
+			c := config.TopologyInfo{
 				Region: mock.MockRegion,
 			}
 			Expect(m.hasEmptyTopologyInfo(c)).To(BeTrue())
 		})
 
 		It("should detect empty region", func() {
-			c := config.TopologyCategories{
+			c := config.TopologyInfo{
 				Zone: mock.MockZone,
 			}
 			Expect(m.hasEmptyTopologyInfo(c)).To(BeTrue())
 		})
 
 		It("should detect non-empty region", func() {
-			c := config.TopologyCategories{
+			c := config.TopologyInfo{
 				Zone:   mock.MockZone,
 				Region: mock.MockRegion,
 			}
@@ -136,6 +144,52 @@ var _ = Describe("Test Manager", func() {
 			providerID, err := m.generateProviderID(ctx, *vm.Metadata.UUID)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(providerID).To(Equal(fmt.Sprintf("nutanix://%s", *vm.Metadata.UUID)))
+		})
+	})
+
+	Context("Test getTopologyInfoFromVM", func() {
+		It("should fail if vm is empty", func() {
+			err := m.getTopologyInfoFromVM(nil, &config.TopologyInfo{})
+			Expect(err).Should(HaveOccurred())
+		})
+
+		It("should fail if topologyInfo is empty", func() {
+			vm := mockEnvironment.GetVM(mock.MockVMNamePoweredOn)
+			err := m.getTopologyInfoFromVM(vm, nil)
+			Expect(err).Should(HaveOccurred())
+		})
+	})
+
+	Context("Test getTopologyInfoFromCluster", func() {
+		It("should fail if nutanixClient is empty", func() {
+			vm := mockEnvironment.GetVM(mock.MockVMNamePoweredOn)
+			err := m.getTopologyInfoFromCluster(nil, vm, &config.TopologyInfo{})
+			Expect(err).Should(HaveOccurred())
+		})
+
+		It("should fail if vm is empty", func() {
+			err = m.getTopologyInfoFromCluster(nClient, nil, &config.TopologyInfo{})
+			Expect(err).Should(HaveOccurred())
+		})
+
+		It("should fail if topologyInfo is empty", func() {
+			vm := mockEnvironment.GetVM(mock.MockVMNamePoweredOn)
+			Expect(err).ToNot(HaveOccurred())
+			err = m.getTopologyInfoFromCluster(nClient, vm, nil)
+			Expect(err).Should(HaveOccurred())
+		})
+	})
+
+	Context("Test getTopologyInfoUsingPrism", func() {
+		It("should fail if nutanixClient is empty", func() {
+			vm := mockEnvironment.GetVM(mock.MockVMNamePoweredOn)
+			_, err := m.getTopologyInfoUsingPrism(nil, vm)
+			Expect(err).Should(HaveOccurred())
+		})
+
+		It("should fail if vm is empty", func() {
+			_, err := m.getTopologyInfoUsingPrism(nClient, nil)
+			Expect(err).Should(HaveOccurred())
 		})
 	})
 })

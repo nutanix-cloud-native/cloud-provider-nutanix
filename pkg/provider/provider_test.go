@@ -17,10 +17,7 @@ import (
 )
 
 var _ = Describe("Test Provider", func() {
-	const (
-		mockReaderValue      = "mock-reader"
-		expectedProvidername = "nutanix"
-	)
+	const mockReaderValue = "mock-reader"
 
 	var (
 		kClient   *fake.Clientset
@@ -36,7 +33,7 @@ var _ = Describe("Test Provider", func() {
 			config: c,
 		}
 		ntnxCloud = NtnxCloud{
-			name:   expectedProvidername,
+			name:   constants.ProviderName,
 			config: c,
 			manager: &nutanixManager{
 				config:        c,
@@ -131,11 +128,64 @@ var _ = Describe("Test Provider", func() {
 			Expect(err).To(HaveOccurred())
 		})
 
+		It("should fail topologyCategories are not set but discovery type is Categories", func() {
+			config := config.Config{
+				TopologyDiscovery: config.TopologyDiscovery{
+					Type: config.CategoriesTopologyDiscoveryType,
+				},
+			}
+			cBytes, err := json.Marshal(config)
+			Expect(err).ToNot(HaveOccurred())
+			cReader := bytes.NewReader(cBytes)
+			_, err = newNtnxCloud(cReader)
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should fail if invalid topology discovery type is passed", func() {
+			config := config.Config{
+				TopologyDiscovery: config.TopologyDiscovery{
+					Type: "invalid",
+				},
+			}
+			cBytes, err := json.Marshal(config)
+			Expect(err).ToNot(HaveOccurred())
+			cReader := bytes.NewReader(cBytes)
+			_, err = newNtnxCloud(cReader)
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should fail if invalid topology discovery type is passed", func() {
+			config := config.Config{
+				TopologyDiscovery: config.TopologyDiscovery{
+					Type: "invalid",
+				},
+			}
+			cBytes, err := json.Marshal(config)
+			Expect(err).ToNot(HaveOccurred())
+			cReader := bytes.NewReader(cBytes)
+			_, err = newNtnxCloud(cReader)
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should default to Prism topology Discovery", func() {
+			c := config.Config{
+				TopologyDiscovery: config.TopologyDiscovery{},
+			}
+			cBytes, err := json.Marshal(c)
+			Expect(err).ToNot(HaveOccurred())
+			cReader := bytes.NewReader(cBytes)
+			_, err = newNtnxCloud(cReader)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
 		It("should return valid NtnxCloud when valid reader is passed", func() {
 			config := config.Config{
-				TopologyCategories: &config.TopologyCategories{
-					Region: mock.MockDefaultRegion,
-					Zone:   mock.MockDefaultZone,
+				TopologyDiscovery: config.TopologyDiscovery{
+					Type: config.CategoriesTopologyDiscoveryType,
+					TopologyCategories: &config.TopologyCategories{
+						RegionCategory: mock.MockDefaultRegion,
+						ZoneCategory:   mock.MockDefaultZone,
+					},
 				},
 			}
 			cJson, err := json.Marshal(config)

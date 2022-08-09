@@ -69,6 +69,13 @@ func getDefaultClusterSpec(clusterName string) *prismClientV3.ClusterIntentRespo
 		Spec: &prismClientV3.Cluster{
 			Name: utils.StringPtr(clusterName),
 		},
+		Status: &prismClientV3.ClusterDefStatus{
+			Resources: &prismClientV3.ClusterObj{
+				Config: &prismClientV3.ClusterConfig{
+					ServiceList: make([]*string, 0),
+				},
+			},
+		},
 	}
 }
 
@@ -112,6 +119,9 @@ func GenerateMockConfig() config.Config {
 				Namespace: mockNamespace,
 			},
 		},
+		TopologyDiscovery: config.TopologyDiscovery{
+			Type: config.PrismTopologyDiscoveryType,
+		},
 	}
 }
 
@@ -130,5 +140,13 @@ func CheckAdditionalLabels(node *v1.Node, vm *prismClientV3.VMIntentResponse) {
 		toMatchKeys[constants.CustomHostNameLabel] = Equal(*vm.Status.Resources.HostReference.Name)
 	}
 
-	Expect(node.Labels).To(gstruct.MatchKeys(gstruct.IgnoreMissing, toMatchKeys))
+	Expect(node.Labels).To(gstruct.MatchAllKeys(toMatchKeys))
+}
+
+func CreatePrismCentralCluster(clusterName string) *prismClientV3.ClusterIntentResponse {
+	pc := getDefaultClusterSpec(clusterName)
+	pc.Status.Resources.Config.ServiceList = []*string{
+		utils.StringPtr(constants.PrismCentralService),
+	}
+	return pc
 }

@@ -21,3 +21,14 @@ func (mp *MockPrism) GetVM(vmUUID string) (*prismClientV3.VMIntentResponse, erro
 func (mp *MockPrism) GetCluster(clusterUUID string) (*prismClientV3.ClusterIntentResponse, error) {
 	return mp.mockEnvironment.managedMockClusters[clusterUUID], nil
 }
+
+func (mp *MockPrism) ListAllCluster(fitler string) (*prismClientV3.ClusterListIntentResponse, error) {
+	entities := make([]*prismClientV3.ClusterIntentResponse, 0)
+
+	for _, e := range mp.mockEnvironment.managedMockClusters {
+		entities = append(entities, e)
+	}
+	return &prismClientV3.ClusterListIntentResponse{
+		Entities: entities,
+	}, nil
+}
