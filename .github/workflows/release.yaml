@@ -1,10 +1,9 @@
 name: Generate release artefact
 
 on:
-  # push:
-  #   tags:
-  #   - "v*.*.*"
-  workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
 
 jobs:
   build_release:
@@ -50,18 +49,26 @@ jobs:
           KO_DOCKER_REPO: ghcr.io/${{ github.repository }}/controller
           TAGS: ${{ steps.meta.outputs.tags }}
           LABELS: ${{ steps.meta.outputs.labels }}
-          PLATFORMS: linux/amd64,linux/arm64,linux/arm
+          PLATFORMS: linux/amd64
         run: |
           PTAGS=`echo $TAGS | sed 's/ccm-nutanix://g'`
           export SOURCE_DATE_EPOCH=$(date +%s)
           ko build --bare --image-label "$LABELS" -t "$PTAGS" --platform=$PLATFORMS .
 
-      - name: parse semver
-        id: semver
+      - name: Generate image info
         env:
-          SEMVER: ${{ steps.meta.outputs.version }}
+          NEW_IMG: ghcr.io/${{ github.repository }}/controller:${{ steps.meta.outputs.version }}
         run: |
-          n=${SEMVER//[!0-9]/ }
-          a=(${n//\./ })
-          echo "::set-output name=major::${a[0]}"
-          echo "::set-output name=minor::${a[1]}"
+          echo "## Images" >> ${{ github.workspace }}-CHANGELOG.txt
+          echo "|Name|Link|" >> ${{ github.workspace }}-CHANGELOG.txt
+          echo "|-|-|" >> ${{ github.workspace }}-CHANGELOG.txt
+          echo "|Nutanix Cloud Provider|[$NEW_IMG]($NEW_IMG)|" >> ${{ github.workspace }}-CHANGELOG.txt
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: false
+          prerelease: true
+          body_path: ${{ github.workspace }}-CHANGELOG.txt
+          generate_release_notes: true
+          append_body: true
