@@ -7,11 +7,11 @@ require (
 	github.com/nutanix-cloud-native/prism-go-client v0.2.1-0.20220728162452-e667703bf00c
 	github.com/onsi/ginkgo/v2 v2.1.4
 	github.com/onsi/gomega v1.19.0
-	k8s.io/api v0.24.2
-	k8s.io/apimachinery v0.24.2
-	k8s.io/client-go v0.24.2
+	k8s.io/api v0.24.4
+	k8s.io/apimachinery v0.24.4
+	k8s.io/client-go v0.24.4
 	k8s.io/cloud-provider v0.24.2
-	k8s.io/component-base v0.24.2
+	k8s.io/component-base v0.24.4
 	k8s.io/klog/v2 v2.60.1
 )
 
