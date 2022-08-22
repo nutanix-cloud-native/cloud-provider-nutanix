@@ -1,5 +1,5 @@
 # Image URL to use all building/pushing image targets
-IMG ?= nutanix-ccm:latest
+IMG ?= nutanix-cloud-controller-manager:latest
 VERSION = 1.0.0
 
 all: build image
