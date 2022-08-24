@@ -2,7 +2,7 @@ FROM registry.ci.openshift.org/openshift/release:golang-1.18 AS builder
 
 WORKDIR /build
 COPY . .
-RUN make build
+RUN make openshift-build
 
 FROM registry.ci.openshift.org/ocp/4.12:base
 
