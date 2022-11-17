@@ -80,7 +80,7 @@ func (n *nutanixManager) getInstanceMetadata(ctx context.Context, node *v1.Node)
 	if err != nil {
 		return nil, err
 	}
-	vm, err := nClient.GetVM(vmUUID)
+	vm, err := nClient.GetVM(ctx, vmUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +91,7 @@ func (n *nutanixManager) getInstanceMetadata(ctx context.Context, node *v1.Node)
 		return nil, err
 	}
 
-	topologyInfo, err := n.getTopologyInfo(nClient, vm)
+	topologyInfo, err := n.getTopologyInfo(ctx, nClient, vm)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +123,7 @@ func (n *nutanixManager) addCustomLabelsToNode(ctx context.Context, node *v1.Nod
 		return err
 	}
 	vmUUID := n.stripNutanixIDFromProviderID(providerID)
-	vm, err := nClient.GetVM(vmUUID)
+	vm, err := nClient.GetVM(ctx, vmUUID)
 	if err != nil {
 		return err
 	}
@@ -179,7 +179,7 @@ func (n *nutanixManager) nodeExists(ctx context.Context, node *v1.Node) (bool, e
 	if err != nil {
 		return false, err
 	}
-	_, err = nClient.GetVM(vmUUID)
+	_, err = nClient.GetVM(ctx, vmUUID)
 	if err != nil {
 		if !strings.Contains(fmt.Sprint(err), "ENTITY_NOT_FOUND") {
 			return false, err
@@ -200,7 +200,7 @@ func (n *nutanixManager) isNodeShutdown(ctx context.Context, node *v1.Node) (boo
 	if err != nil {
 		return false, err
 	}
-	vm, err := nClient.GetVM(vmUUID)
+	vm, err := nClient.GetVM(ctx, vmUUID)
 	if err != nil {
 		return false, err
 	}
@@ -286,19 +286,19 @@ func (n *nutanixManager) stripNutanixIDFromProviderID(providerID string) string 
 	return strings.TrimPrefix(providerID, fmt.Sprintf("%s://", constants.ProviderName))
 }
 
-func (n *nutanixManager) getTopologyInfo(nutanixClient interfaces.Prism, vm *prismClientV3.VMIntentResponse) (config.TopologyInfo, error) {
+func (n *nutanixManager) getTopologyInfo(ctx context.Context, nutanixClient interfaces.Prism, vm *prismClientV3.VMIntentResponse) (config.TopologyInfo, error) {
 	topologyDiscovery := n.config.TopologyDiscovery
 
 	switch topologyDiscovery.Type {
 	case config.PrismTopologyDiscoveryType:
-		return n.getTopologyInfoUsingPrism(nutanixClient, vm)
+		return n.getTopologyInfoUsingPrism(ctx, nutanixClient, vm)
 	case config.CategoriesTopologyDiscoveryType:
-		return n.getTopologyInfoUsingCategories(nutanixClient, vm)
+		return n.getTopologyInfoUsingCategories(ctx, nutanixClient, vm)
 	}
 	return config.TopologyInfo{}, fmt.Errorf("unsupported topology discovery type: %s", topologyDiscovery.Type)
 }
 
-func (n *nutanixManager) getTopologyInfoUsingPrism(nClient interfaces.Prism, vm *prismClientV3.VMIntentResponse) (config.TopologyInfo, error) {
+func (n *nutanixManager) getTopologyInfoUsingPrism(ctx context.Context, nClient interfaces.Prism, vm *prismClientV3.VMIntentResponse) (config.TopologyInfo, error) {
 	ti := config.TopologyInfo{}
 	if nClient == nil {
 		return ti, fmt.Errorf("nutanix client cannot be nil when searching for Prism topology info")
@@ -311,7 +311,7 @@ func (n *nutanixManager) getTopologyInfoUsingPrism(nClient interfaces.Prism, vm 
 		return ti, fmt.Errorf("cannot determine Prism zone information for vm %s", *vm.Spec.Name)
 	}
 
-	pc, err := n.getPrismCentralCluster(nClient)
+	pc, err := n.getPrismCentralCluster(ctx, nClient)
 	if err != nil {
 		return ti, err
 	}
@@ -320,7 +320,7 @@ func (n *nutanixManager) getTopologyInfoUsingPrism(nClient interfaces.Prism, vm 
 	return ti, nil
 }
 
-func (n *nutanixManager) getTopologyInfoUsingCategories(nutanixClient interfaces.Prism, vm *prismClientV3.VMIntentResponse) (config.TopologyInfo, error) {
+func (n *nutanixManager) getTopologyInfoUsingCategories(ctx context.Context, nutanixClient interfaces.Prism, vm *prismClientV3.VMIntentResponse) (config.TopologyInfo, error) {
 	tc := &config.TopologyInfo{}
 	if vm == nil {
 		return *tc, fmt.Errorf("vm cannot be nil while getting topology info")
@@ -341,7 +341,7 @@ func (n *nutanixManager) getTopologyInfoUsingCategories(nutanixClient interfaces
 	}
 
 	klog.V(1).Infof("searching for topology info on cluster entity for VM: %s", *vm.Spec.Name)
-	err = n.getTopologyInfoFromCluster(nClient, vm, tc)
+	err = n.getTopologyInfoFromCluster(ctx, nClient, vm, tc)
 	if err != nil {
 		return *tc, err
 	}
@@ -363,7 +363,7 @@ func (n *nutanixManager) getZoneInfoFromCategories(categories map[string]string,
 	return nil
 }
 
-func (n *nutanixManager) getTopologyInfoFromCluster(nClient interfaces.Prism, vm *prismClientV3.VMIntentResponse, ti *config.TopologyInfo) error {
+func (n *nutanixManager) getTopologyInfoFromCluster(ctx context.Context, nClient interfaces.Prism, vm *prismClientV3.VMIntentResponse, ti *config.TopologyInfo) error {
 	if nClient == nil {
 		return fmt.Errorf("nutanix client cannot be nil when searching for topology info")
 	}
@@ -374,7 +374,7 @@ func (n *nutanixManager) getTopologyInfoFromCluster(nClient interfaces.Prism, vm
 		return fmt.Errorf("topology categories cannot be nil when searching for topology info")
 	}
 	clusterUUID := *vm.Status.ClusterReference.UUID
-	cluster, err := nClient.GetCluster(clusterUUID)
+	cluster, err := nClient.GetCluster(ctx, clusterUUID)
 	if err != nil {
 		return fmt.Errorf("error occurred while searching for topology info on cluster: %v", err)
 	}
@@ -407,12 +407,12 @@ func (n *nutanixManager) hasEmptyTopologyInfo(ti config.TopologyInfo) bool {
 	return false
 }
 
-func (n *nutanixManager) getPrismCentralCluster(nClient interfaces.Prism) (*prismClientV3.ClusterIntentResponse, error) {
+func (n *nutanixManager) getPrismCentralCluster(ctx context.Context, nClient interfaces.Prism) (*prismClientV3.ClusterIntentResponse, error) {
 	const filter = ""
 	if nClient == nil {
 		return nil, fmt.Errorf("nutanix client cannot be nil when getting prism central cluster")
 	}
-	responsePEs, err := nClient.ListAllCluster(filter)
+	responsePEs, err := nClient.ListAllCluster(ctx, filter)
 	if err != nil {
 		return nil, err
 	}

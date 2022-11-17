@@ -24,9 +24,10 @@ import (
 )
 
 type MockClient struct {
-	mockPrism       MockPrism
-	sharedInformers informers.SharedInformerFactory
-	secretInformer  coreinformers.SecretInformer
+	mockPrism         MockPrism
+	sharedInformers   informers.SharedInformerFactory
+	secretInformer    coreinformers.SecretInformer
+	configMapInformer coreinformers.ConfigMapInformer
 }
 
 func CreateMockClient(mockEnvironment MockEnvironment) *MockClient {

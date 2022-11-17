@@ -22,6 +22,7 @@ import (
 
 	prismgoclient "github.com/nutanix-cloud-native/prism-go-client"
 	"github.com/nutanix-cloud-native/prism-go-client/environment"
+	credentialTypes "github.com/nutanix-cloud-native/prism-go-client/environment/credentials"
 	kubernetesEnv "github.com/nutanix-cloud-native/prism-go-client/environment/providers/kubernetes"
 	envTypes "github.com/nutanix-cloud-native/prism-go-client/environment/types"
 	prismClientV3 "github.com/nutanix-cloud-native/prism-go-client/v3"
@@ -35,13 +36,14 @@ import (
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/interfaces"
 )
 
-const errEnvironmentNotReady = "Environment not initialized or ready yet"
+const errEnvironmentNotReady = "environment not initialized or ready yet"
 
 type nutanixClient struct {
-	env             envTypes.Environment
-	config          config.Config
-	secretInformer  coreinformers.SecretInformer
-	sharedInformers informers.SharedInformerFactory
+	env               envTypes.Environment
+	config            config.Config
+	secretInformer    coreinformers.SecretInformer
+	sharedInformers   informers.SharedInformerFactory
+	configMapInformer coreinformers.ConfigMapInformer
 }
 
 func (n *nutanixClient) Get() (interfaces.Prism, error) {
@@ -74,12 +76,12 @@ func (n *nutanixClient) Get() (interfaces.Prism, error) {
 
 func (n *nutanixClient) setupEnvironment() {
 	pc := n.config.PrismCentral
-	prismEndpoint := kubernetesEnv.NutanixPrismEndpoint{
+	prismEndpoint := credentialTypes.NutanixPrismEndpoint{
 		Address:  pc.Address,
 		Port:     pc.Port,
 		Insecure: pc.Insecure,
-		CredentialRef: &kubernetesEnv.NutanixCredentialReference{
-			Kind: kubernetesEnv.SecretKind,
+		CredentialRef: &credentialTypes.NutanixCredentialReference{
+			Kind: credentialTypes.SecretKind,
 			Namespace: func() string {
 				if pc.CredentialRef.Namespace != "" {
 					return pc.CredentialRef.Namespace
@@ -90,13 +92,19 @@ func (n *nutanixClient) setupEnvironment() {
 		},
 	}
 	n.env = environment.NewEnvironment(kubernetesEnv.NewProvider(prismEndpoint,
-		n.secretInformer))
+		n.secretInformer, n.configMapInformer))
 }
 
 func (n *nutanixClient) SetInformers(sharedInformers informers.SharedInformerFactory) {
 	n.sharedInformers = sharedInformers
 	n.secretInformer = n.sharedInformers.Core().V1().Secrets()
-	hasSynced := n.secretInformer.Informer().HasSynced
+	n.configMapInformer = n.sharedInformers.Core().V1().ConfigMaps()
+	n.syncCache(n.secretInformer.Informer())
+	n.setupEnvironment()
+}
+
+func (n *nutanixClient) syncCache(informer cache.SharedInformer) {
+	hasSynced := informer.HasSynced
 	if !hasSynced() {
 		stopCh := context.Background().Done()
 		go n.secretInformer.Informer().Run(stopCh)
@@ -106,5 +114,4 @@ func (n *nutanixClient) SetInformers(sharedInformers informers.SharedInformerFac
 		}
 		klog.Info("Secrets cache synced")
 	}
-	n.setupEnvironment()
 }

@@ -17,6 +17,7 @@ limitations under the License.
 package mock
 
 import (
+	"context"
 	"fmt"
 
 	prismClientV3 "github.com/nutanix-cloud-native/prism-go-client/v3"
@@ -26,7 +27,7 @@ type MockPrism struct {
 	mockEnvironment MockEnvironment
 }
 
-func (mp *MockPrism) GetVM(vmUUID string) (*prismClientV3.VMIntentResponse, error) {
+func (mp *MockPrism) GetVM(ctx context.Context, vmUUID string) (*prismClientV3.VMIntentResponse, error) {
 	if v, ok := mp.mockEnvironment.managedMockMachines[vmUUID]; ok {
 		return v, nil
 	} else {
@@ -34,11 +35,11 @@ func (mp *MockPrism) GetVM(vmUUID string) (*prismClientV3.VMIntentResponse, erro
 	}
 }
 
-func (mp *MockPrism) GetCluster(clusterUUID string) (*prismClientV3.ClusterIntentResponse, error) {
+func (mp *MockPrism) GetCluster(ctx context.Context, clusterUUID string) (*prismClientV3.ClusterIntentResponse, error) {
 	return mp.mockEnvironment.managedMockClusters[clusterUUID], nil
 }
 
-func (mp *MockPrism) ListAllCluster(fitler string) (*prismClientV3.ClusterListIntentResponse, error) {
+func (mp *MockPrism) ListAllCluster(ctx context.Context, filter string) (*prismClientV3.ClusterListIntentResponse, error) {
 	entities := make([]*prismClientV3.ClusterIntentResponse, 0)
 
 	for _, e := range mp.mockEnvironment.managedMockClusters {

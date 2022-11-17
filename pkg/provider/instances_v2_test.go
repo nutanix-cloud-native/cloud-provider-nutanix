@@ -24,7 +24,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/client-go/kubernetes/fake"
-	"k8s.io/klog/v2"
 
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/testing/mock"
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
@@ -144,7 +143,7 @@ var _ = Describe("Test InstancesV2", func() {
 
 		It("[TopologyDiscovery: Categories] should have zone and region set if TopologyCategories passed in config and VM has categories", func() {
 			node := mockEnvironment.GetNode(mock.MockVMNameCategories)
-			vm := mockEnvironment.GetVM(mock.MockVMNameCategories)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameCategories)
 			metadata, err := i.InstanceMetadata(ctx, node)
 			Expect(err).ShouldNot(HaveOccurred())
 			mock.ValidateInstanceMetadata(metadata, vm, mock.MockRegion, mock.MockZone)
@@ -153,7 +152,7 @@ var _ = Describe("Test InstancesV2", func() {
 		It("[TopologyDiscovery: Categories] should have zone and region set if TopologyCategories is passed in config and cluster has categories", func() {
 			// VM does not have categories but cluster has
 			node := mockEnvironment.GetNode(mock.MockVMNamePoweredOnClusterCategories)
-			vm := mockEnvironment.GetVM(mock.MockVMNamePoweredOnClusterCategories)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOnClusterCategories)
 			metadata, err := i.InstanceMetadata(ctx, node)
 			Expect(err).ShouldNot(HaveOccurred())
 			mock.ValidateInstanceMetadata(metadata, vm, mock.MockRegion, mock.MockZone)
@@ -161,7 +160,7 @@ var _ = Describe("Test InstancesV2", func() {
 
 		It("[TopologyDiscovery: Categories] should not have zone and region set if TopologyCategories is not passed in config and VM has categories", func() {
 			node := mockEnvironment.GetNode(mock.MockVMNameCategories)
-			vm := mockEnvironment.GetVM(mock.MockVMNameCategories)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameCategories)
 			// clear config so  topology categories are not configured
 			i.nutanixManager.config.TopologyDiscovery.TopologyCategories = &config.TopologyCategories{}
 			metadata, err := i.InstanceMetadata(ctx, node)
@@ -172,7 +171,7 @@ var _ = Describe("Test InstancesV2", func() {
 		It("[TopologyDiscovery: Categories] should not have zone and region set if TopologyCategories is not passed in config and cluster has categories", func() {
 			// VM does not have categories but cluster has
 			node := mockEnvironment.GetNode(mock.MockVMNamePoweredOnClusterCategories)
-			vm := mockEnvironment.GetVM(mock.MockVMNamePoweredOnClusterCategories)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOnClusterCategories)
 			// clear config so  topology categories are not configured
 			i.nutanixManager.config.TopologyDiscovery.TopologyCategories = &config.TopologyCategories{}
 			metadata, err := i.InstanceMetadata(ctx, node)
@@ -182,7 +181,7 @@ var _ = Describe("Test InstancesV2", func() {
 
 		It("[TopologyDiscovery: Categories] should not have zone and region set if TopologyCategories is set and VM does not have categories", func() {
 			node := mockEnvironment.GetNode(mock.MockVMNamePoweredOn)
-			vm := mockEnvironment.GetVM(mock.MockVMNamePoweredOn)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
 			metadata, err := i.InstanceMetadata(ctx, node)
 			Expect(err).ShouldNot(HaveOccurred())
 			mock.ValidateInstanceMetadata(metadata, vm, "", "")
@@ -190,7 +189,7 @@ var _ = Describe("Test InstancesV2", func() {
 
 		It("[TopologyDiscovery: Prism] should have PC name set as region and PE as zone", func() {
 			node := mockEnvironment.GetNode(mock.MockVMNamePoweredOn)
-			vm := mockEnvironment.GetVM(mock.MockVMNamePoweredOn)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
 			// Change config to Prism topology discovery
 			i.nutanixManager.config = prismTopologyConfig
 			metadata, err := i.InstanceMetadata(ctx, node)
@@ -208,8 +207,7 @@ var _ = Describe("Test InstancesV2", func() {
 		})
 
 		It("[TopologyDiscovery: Prism] should fail if no PC is found", func() {
-			pc := mockEnvironment.GetCluster(mock.MockPrismCentral)
-			klog.Info(pc)
+			pc := mockEnvironment.GetCluster(ctx, mock.MockPrismCentral)
 			mockEnvironment.DeleteCluster(*pc.Metadata.UUID)
 			node := mockEnvironment.GetNode(mock.MockVMNamePoweredOn)
 			// Change config to Prism topology discovery
@@ -220,7 +218,7 @@ var _ = Describe("Test InstancesV2", func() {
 
 		It("should have all custom labels set if custom labels are enabled and VM is poweredOn", func() {
 			node := mockEnvironment.GetNode(mock.MockVMNamePoweredOn)
-			vm := mockEnvironment.GetVM(mock.MockVMNamePoweredOn)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
 			_, err := i.InstanceMetadata(ctx, node)
 			Expect(err).ShouldNot(HaveOccurred())
 			updatedNode, err := kClient.CoreV1().Nodes().Get(ctx, node.ObjectMeta.Name, metav1.GetOptions{})
@@ -230,7 +228,7 @@ var _ = Describe("Test InstancesV2", func() {
 
 		It("should not have Prism Host labels set if custom labels are enabled and VM is poweredOff", func() {
 			node := mockEnvironment.GetNode(mock.MockVMNamePoweredOff)
-			vm := mockEnvironment.GetVM(mock.MockVMNamePoweredOff)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOff)
 			_, err := i.InstanceMetadata(ctx, node)
 			Expect(err).ShouldNot(HaveOccurred())
 			updatedNode, err := kClient.CoreV1().Nodes().Get(ctx, node.ObjectMeta.Name, metav1.GetOptions{})
