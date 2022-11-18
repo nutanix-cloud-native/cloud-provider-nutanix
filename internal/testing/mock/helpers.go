@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	credentialTypes "github.com/nutanix-cloud-native/prism-go-client/environment/credentials"
 	"github.com/nutanix-cloud-native/prism-go-client/utils"
 	prismClientV3 "github.com/nutanix-cloud-native/prism-go-client/v3"
 	. "github.com/onsi/gomega"
@@ -125,12 +126,12 @@ func ValidateInstanceMetadata(metadata *cloudprovider.InstanceMetadata, vm *pris
 
 func GenerateMockConfig() config.Config {
 	return config.Config{
-		PrismCentral: config.NutanixPrismEndpoint{
+		PrismCentral: credentialTypes.NutanixPrismEndpoint{
 			Address:  mockAddress,
 			Port:     mockPort,
 			Insecure: mockInsecure,
-			CredentialRef: &config.NutanixCredentialReference{
-				Kind:      config.SecretKind,
+			CredentialRef: &credentialTypes.NutanixCredentialReference{
+				Kind:      credentialTypes.SecretKind,
 				Name:      mockCredentialRef,
 				Namespace: mockNamespace,
 			},

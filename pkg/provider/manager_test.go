@@ -96,13 +96,13 @@ var _ = Describe("Test Manager", func() {
 
 	Context("Test IsVMShutdown", func() {
 		It("should detect if VM is powered off", func() {
-			vm := mockEnvironment.GetVM(mock.MockVMNamePoweredOff)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOff)
 			Expect(vm).ToNot(BeNil())
 			Expect(m.isVMShutdown(vm)).To(BeTrue())
 		})
 
 		It("should detect if VM is powered on", func() {
-			vm := mockEnvironment.GetVM(mock.MockVMNamePoweredOn)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
 			Expect(vm).ToNot(BeNil())
 			Expect(m.isVMShutdown(vm)).To(BeFalse())
 		})
@@ -115,14 +115,14 @@ var _ = Describe("Test Manager", func() {
 		})
 
 		It("should fail if no node addresses are found", func() {
-			vm := mockEnvironment.GetVM(mock.MockVMNameNoAddresses)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameNoAddresses)
 			Expect(vm).ToNot(BeNil())
 			_, err := m.getNodeAddresses(ctx, vm)
 			Expect(err).Should(HaveOccurred())
 		})
 
 		It("should fetch the correct node addresses", func() {
-			vm := mockEnvironment.GetVM(mock.MockVMNamePoweredOn)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
 			Expect(vm).ToNot(BeNil())
 			addresses, err := m.getNodeAddresses(ctx, vm)
 			Expect(err).ShouldNot(HaveOccurred())
@@ -155,7 +155,7 @@ var _ = Describe("Test Manager", func() {
 		})
 
 		It("should return providerID in valid format", func() {
-			vm := mockEnvironment.GetVM(mock.MockVMNamePoweredOn)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
 			Expect(vm).ToNot(BeNil())
 			providerID, err := m.generateProviderID(ctx, *vm.Metadata.UUID)
 			Expect(err).ToNot(HaveOccurred())
@@ -170,7 +170,7 @@ var _ = Describe("Test Manager", func() {
 		})
 
 		It("should fail if topologyInfo is empty", func() {
-			vm := mockEnvironment.GetVM(mock.MockVMNamePoweredOn)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
 			err := m.getTopologyInfoFromVM(vm, nil)
 			Expect(err).Should(HaveOccurred())
 		})
@@ -178,33 +178,33 @@ var _ = Describe("Test Manager", func() {
 
 	Context("Test getTopologyInfoFromCluster", func() {
 		It("should fail if nutanixClient is empty", func() {
-			vm := mockEnvironment.GetVM(mock.MockVMNamePoweredOn)
-			err := m.getTopologyInfoFromCluster(nil, vm, &config.TopologyInfo{})
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
+			err := m.getTopologyInfoFromCluster(ctx, nil, vm, &config.TopologyInfo{})
 			Expect(err).Should(HaveOccurred())
 		})
 
 		It("should fail if vm is empty", func() {
-			err = m.getTopologyInfoFromCluster(nClient, nil, &config.TopologyInfo{})
+			err = m.getTopologyInfoFromCluster(ctx, nClient, nil, &config.TopologyInfo{})
 			Expect(err).Should(HaveOccurred())
 		})
 
 		It("should fail if topologyInfo is empty", func() {
-			vm := mockEnvironment.GetVM(mock.MockVMNamePoweredOn)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
 			Expect(err).ToNot(HaveOccurred())
-			err = m.getTopologyInfoFromCluster(nClient, vm, nil)
+			err = m.getTopologyInfoFromCluster(ctx, nClient, vm, nil)
 			Expect(err).Should(HaveOccurred())
 		})
 	})
 
 	Context("Test getTopologyInfoUsingPrism", func() {
 		It("should fail if nutanixClient is empty", func() {
-			vm := mockEnvironment.GetVM(mock.MockVMNamePoweredOn)
-			_, err := m.getTopologyInfoUsingPrism(nil, vm)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
+			_, err := m.getTopologyInfoUsingPrism(ctx, nil, vm)
 			Expect(err).Should(HaveOccurred())
 		})
 
 		It("should fail if vm is empty", func() {
-			_, err := m.getTopologyInfoUsingPrism(nClient, nil)
+			_, err := m.getTopologyInfoUsingPrism(ctx, nClient, nil)
 			Expect(err).Should(HaveOccurred())
 		})
 	})

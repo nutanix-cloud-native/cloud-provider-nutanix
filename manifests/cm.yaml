@@ -18,10 +18,6 @@ data:
       },
       "enableCustomLabeling": false,
       "topologyDiscovery": {
-        "type": "Categories",
-        "topologyCategories": {
-          "regionCategory": "${NUTANIX_REGION_CATEGORY}",
-          "zoneCategory": "${NUTANIX_ZONE_CATEGORY}"
-        }
+        "type": "Prism"
       }
     }

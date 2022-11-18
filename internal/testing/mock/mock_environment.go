@@ -35,7 +35,7 @@ type MockEnvironment struct {
 	managedNodes        map[string]*v1.Node
 }
 
-func (m *MockEnvironment) GetVM(vmName string) *prismClientV3.VMIntentResponse {
+func (m *MockEnvironment) GetVM(ctx context.Context, vmName string) *prismClientV3.VMIntentResponse {
 	for _, v := range m.managedMockMachines {
 		if *v.Spec.Name == vmName {
 			return v
@@ -51,7 +51,7 @@ func (m *MockEnvironment) GetNode(nodeName string) *v1.Node {
 	return nil
 }
 
-func (m *MockEnvironment) GetCluster(clusterName string) *prismClientV3.ClusterIntentResponse {
+func (m *MockEnvironment) GetCluster(ctx context.Context, clusterName string) *prismClientV3.ClusterIntentResponse {
 	for _, v := range m.managedMockClusters {
 		if *v.Spec.Name == clusterName {
 			return v

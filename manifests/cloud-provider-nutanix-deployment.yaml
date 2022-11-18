@@ -53,7 +53,7 @@ spec:
           key: node.kubernetes.io/not-ready
           operator: Exists
       containers:
-        - image: $IMG
+        - image: ${IMG}
           imagePullPolicy: Always
           name: nutanix-cloud-controller-manager
           args:
@@ -67,6 +67,11 @@ spec:
             - mountPath: /etc/cloud
               name: nutanix-config-volume
               readOnly: true
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
       volumes:
         - name: nutanix-config-volume
           configMap:
