@@ -20,7 +20,7 @@ const (
 	ProviderName string = "nutanix"
 	ClientName   string = "nutanix-cloud-controller-manager"
 
-	DefaultCCMSecretNamespace string = "kube-system"
+	CCMNamespaceKey = "POD_NAMESPACE"
 
 	InstanceType string = "ahv-vm"
 

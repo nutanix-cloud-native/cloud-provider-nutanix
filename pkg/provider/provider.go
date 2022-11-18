@@ -83,7 +83,6 @@ func (nc *NtnxCloud) Initialize(clientBuilder cloudprovider.ControllerClientBuil
 
 // SetInformers sets the informer on the cloud object. Implements cloudprovider.InformerUser
 func (nc *NtnxCloud) SetInformers(informerFactory informers.SharedInformerFactory) {
-	klog.Info("SetInformers")
 	nc.manager.setInformers(informerFactory)
 }
 
@@ -125,6 +124,5 @@ func (nc *NtnxCloud) Instances() (cloudprovider.Instances, bool) {
 }
 
 func (nc *NtnxCloud) InstancesV2() (cloudprovider.InstancesV2, bool) {
-	klog.Info("InstancesV2")
 	return nc.instancesV2, true
 }

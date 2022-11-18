@@ -20,14 +20,15 @@ import (
 	"encoding/json"
 	"fmt"
 
+	credentialTypes "github.com/nutanix-cloud-native/prism-go-client/environment/credentials"
 	"k8s.io/klog/v2"
 )
 
 // Config of Nutanix provider
 type Config struct {
-	PrismCentral         NutanixPrismEndpoint `json:"prismCentral"`
-	TopologyDiscovery    TopologyDiscovery    `json:"topologyDiscovery"`
-	EnableCustomLabeling bool                 `json:"enableCustomLabeling"`
+	PrismCentral         credentialTypes.NutanixPrismEndpoint `json:"prismCentral"`
+	TopologyDiscovery    TopologyDiscovery                    `json:"topologyDiscovery"`
+	EnableCustomLabeling bool                                 `json:"enableCustomLabeling"`
 }
 
 type TopologyDiscovery struct {
@@ -53,36 +54,6 @@ type TopologyCategories struct {
 	RegionCategory string `json:"regionCategory"`
 }
 
-type NutanixPrismEndpoint struct {
-	// address is the endpoint address (DNS name or IP address) of the Nutanix Prism Central or Element (cluster)
-	Address string `json:"address"`
-
-	// port is the port number to access the Nutanix Prism Central or Element (cluster)
-	Port int32 `json:"port"`
-
-	// use insecure connection to Prism endpoint
-	// +optional
-	Insecure bool `json:"insecure"`
-
-	// Pass credential information for the target Prism instance
-	// +optional
-	CredentialRef *NutanixCredentialReference `json:"credentialRef,omitempty"`
-}
-
-type NutanixCredentialKind string
-
-var SecretKind = NutanixCredentialKind("Secret")
-
-type NutanixCredentialReference struct {
-	// Kind of the Nutanix credential
-	Kind NutanixCredentialKind `json:"kind"`
-
-	// Name of the credential.
-	Name string `json:"name"`
-	// namespace of the credential.
-	Namespace string `json:"namespace"`
-}
-
 func NewConfigFromBytes(bytes []byte) (Config, error) {
 	nutanixConfig := Config{}
 	if err := json.Unmarshal(bytes, &nutanixConfig); err != nil {
@@ -92,7 +63,7 @@ func NewConfigFromBytes(bytes []byte) (Config, error) {
 	case PrismTopologyDiscoveryType:
 		return nutanixConfig, nil
 	case "":
-		klog.Warning("topology discovery type was not set. Defaulting to %s", PrismTopologyDiscoveryType)
+		klog.Warningf("topology discovery type was not set. Defaulting to %s", PrismTopologyDiscoveryType)
 		nutanixConfig.TopologyDiscovery.Type = PrismTopologyDiscoveryType
 		return nutanixConfig, nil
 	case CategoriesTopologyDiscoveryType:

@@ -63,8 +63,7 @@ var _ = Describe("Test Provider", func() {
 		It("should set the informers", func() {
 			informerFactory := informers.NewSharedInformerFactory(kClient, time.Minute)
 			ntnxCloud.SetInformers(informerFactory)
-			_, err := nClient.env.GetManagementEndpoint(nil)
-			Expect(err).To(HaveOccurred())
+			Expect(nClient.env).To(BeNil())
 		})
 	})
 

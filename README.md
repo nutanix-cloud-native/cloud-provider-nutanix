@@ -2,6 +2,37 @@
 
 This repository contains the Kubernetes cloud-controller-manager for Nutanix AHV.
 
+## Developer Workflow
+
+### Build the image
+```
+make ko-build
+```
+
+### Build and push the image
+```
+IMG=<image_name> make docker-push 
+```
+
+### Deploy CCM
+
+**Note**: Requires a Kubernetes cluster that is configured for an external CCM
+
+Make sure following environment variables are set before running `make deploy`:
+
+- NUTANIX_ENDPOINT: Prism Central IP/FQDN
+- NUTANIX_PORT: Prism Central Port (9440)
+- NUTANIX_INSECURE: Disable certificate verification (true or false)
+- NUTANIX_USERNAME: Username to connect to Prism Central 
+- NUTANIX_PASSWORD: Password required to connect to Prism Central
+- IMG: image name of Nutanix CCM 
+
+```
+IMG=<image_name> make deploy
+```
+
+The applied deployment manifests can be found in `_artifacts/manifests` after running `make deploy`. 
+
 ## Contributing
 See the [contributing docs](CONTRIBUTING.md).
 
