@@ -1,10 +1,10 @@
 module github.com/nutanix-cloud-native/cloud-provider-nutanix
 
-go 1.17
+go 1.19
 
 require (
 	github.com/google/uuid v1.3.0
-	github.com/nutanix-cloud-native/prism-go-client v0.3.2
+	github.com/nutanix-cloud-native/prism-go-client v0.3.4
 	github.com/onsi/ginkgo/v2 v2.1.4
 	github.com/onsi/gomega v1.19.0
 	k8s.io/api v0.24.2
