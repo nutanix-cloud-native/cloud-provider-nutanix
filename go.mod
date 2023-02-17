@@ -5,8 +5,8 @@ go 1.19
 require (
 	github.com/google/uuid v1.3.0
 	github.com/nutanix-cloud-native/prism-go-client v0.3.4
-	github.com/onsi/ginkgo/v2 v2.4.0
-	github.com/onsi/gomega v1.23.0
+	github.com/onsi/ginkgo/v2 v2.8.1
+	github.com/onsi/gomega v1.27.0
 	k8s.io/api v0.26.1
 	k8s.io/apimachinery v0.26.1
 	k8s.io/client-go v0.26.1
