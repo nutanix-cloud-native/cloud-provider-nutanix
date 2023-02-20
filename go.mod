@@ -5,8 +5,8 @@ go 1.19
 require (
 	github.com/google/uuid v1.3.0
 	github.com/nutanix-cloud-native/prism-go-client v0.3.4
-	github.com/onsi/ginkgo/v2 v2.4.0
-	github.com/onsi/gomega v1.23.0
+	github.com/onsi/ginkgo/v2 v2.8.1
+	github.com/onsi/gomega v1.27.1
 	k8s.io/api v0.26.1
 	k8s.io/apimachinery v0.26.1
 	k8s.io/client-go v0.26.1
@@ -83,7 +83,7 @@ require (
 	go.uber.org/multierr v1.6.0 // indirect
 	go.uber.org/zap v1.21.0 // indirect
 	golang.org/x/crypto v0.1.0 // indirect
-	golang.org/x/net v0.6.0 // indirect
+	golang.org/x/net v0.7.0 // indirect
 	golang.org/x/oauth2 v0.0.0-20220223155221-ee480838109b // indirect
 	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4 // indirect
 	golang.org/x/sys v0.5.0 // indirect
