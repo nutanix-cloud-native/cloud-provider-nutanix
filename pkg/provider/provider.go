@@ -21,7 +21,6 @@ import (
 	"io"
 	"io/ioutil"
 
-	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/klog/v2"
@@ -79,11 +78,6 @@ func (nc *NtnxCloud) Initialize(clientBuilder cloudprovider.ControllerClientBuil
 	klog.Info("Initializing client ...")
 	nc.addKubernetesClient(clientBuilder.ClientOrDie("cloud-provider-nutanix"))
 	klog.Infof("Client initialized")
-}
-
-// SetInformers sets the informer on the cloud object. Implements cloudprovider.InformerUser
-func (nc *NtnxCloud) SetInformers(informerFactory informers.SharedInformerFactory) {
-	nc.manager.setInformers(informerFactory)
 }
 
 func (nc *NtnxCloud) addKubernetesClient(kclient clientset.Interface) {

@@ -19,12 +19,11 @@ package provider
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"testing"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
@@ -57,14 +56,7 @@ var _ = Describe("Test Provider", func() {
 			},
 			instancesV2: &instancesV2{},
 		}
-	})
-
-	Context("Test SetInformers", func() {
-		It("should set the informers", func() {
-			informerFactory := informers.NewSharedInformerFactory(kClient, time.Minute)
-			ntnxCloud.SetInformers(informerFactory)
-			Expect(nClient.env).To(BeNil())
-		})
+		os.Setenv(constants.CCMNamespaceKey, "ccm-namespace")
 	})
 
 	Context("Test AddKubernetesClient", func() {

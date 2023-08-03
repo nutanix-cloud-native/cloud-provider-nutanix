@@ -19,7 +19,6 @@ package provider
 import (
 	"context"
 	"fmt"
-	"os"
 
 	prismgoclient "github.com/nutanix-cloud-native/prism-go-client"
 	"github.com/nutanix-cloud-native/prism-go-client/environment"
@@ -32,7 +31,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
-	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/interfaces"
 )
@@ -86,7 +84,7 @@ func (n *nutanixClient) setupEnvironment() error {
 	if n.env != nil {
 		return nil
 	}
-	ccmNamespace, err := n.getCCMNamespace()
+	ccmNamespace, err := GetCCMNamespace()
 	if err != nil {
 		return err
 	}
@@ -126,12 +124,4 @@ func (n *nutanixClient) syncCache(informer cache.SharedInformer) {
 			klog.Fatal("failed to wait for caches to sync")
 		}
 	}
-}
-
-func (n *nutanixClient) getCCMNamespace() (string, error) {
-	ns := os.Getenv(constants.CCMNamespaceKey)
-	if ns == "" {
-		return "", fmt.Errorf("failed to retrieve CCM namespace. Make sure %s env variable is set", constants.CCMNamespaceKey)
-	}
-	return ns, nil
 }
