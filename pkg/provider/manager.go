@@ -51,12 +51,22 @@ func newNutanixManager(config config.Config) (*nutanixManager, error) {
 	return m, nil
 }
 
-func (nc *nutanixManager) setInformers(sharedInformers informers.SharedInformerFactory) {
-	nc.nutanixClient.SetInformers(sharedInformers)
-}
-
 func (nc *nutanixManager) setKubernetesClient(client clientset.Interface) {
 	nc.client = client
+	nc.setInformers()
+}
+
+func (nc *nutanixManager) setInformers() {
+	// Set the nutanixClient's informersFactory with the ccm namespace
+	ccmNamespace, err := GetCCMNamespace()
+	if err != nil {
+		klog.Fatal(err.Error())
+	}
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(
+		nc.client, NoResyncPeriodFunc(), informers.WithNamespace(ccmNamespace))
+	nc.nutanixClient.SetInformers(informerFactory)
+
+	klog.Infof("Set the informers with namespace %q", ccmNamespace)
 }
 
 func (n *nutanixManager) getInstanceMetadata(ctx context.Context, node *v1.Node) (*cloudprovider.InstanceMetadata, error) {
