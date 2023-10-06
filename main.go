@@ -50,7 +50,7 @@ func main() {
 	delete(controllerInitializers, "route")
 
 	command := app.NewCloudControllerManagerCommand(ccmOptions,
-		cloudInitializer, controllerInitializers, fss, wait.NeverStop)
+		cloudInitializer, controllerInitializers, map[string]string{}, fss, wait.NeverStop)
 	code := cli.Run(command)
 	os.Exit(code)
 }
