@@ -6,6 +6,8 @@ ARTIFACTS ?= ${REPO_ROOT}/_artifacts
 PLATFORMS ?= linux/amd64 
 IMG_TAG ?= latest
 
+EXPORT_RESULT?=false # for CI please set EXPORT_RESULT to true
+
 build: vendor
 	GO111MODULE=on CGO_ENABLED=0 go build -ldflags="-w -s -X 'main.version=${VERSION}'" -o=bin/nutanix-cloud-controller-manager main.go
 
@@ -20,11 +22,21 @@ vendor:
 
 .PHONY: unit-test
 unit-test:
-	go test --cover -v ./... -coverprofile cover.out
+	go test -v ./...
 
 .PHONY: unit-test-html
 unit-test-html: unit-test
 	go tool cover -html=cover.out
+
+.PHONY: coverage
+coverage: ## Run the tests of the project and export the coverage
+	go test -cover -covermode=count -coverprofile=profile.cov ./...
+	go tool cover -func profile.cov
+ifeq ($(EXPORT_RESULT), true)
+	GO111MODULE=off go get -u github.com/AlekSi/gocov-xml
+	GO111MODULE=off go get -u github.com/axw/gocov/gocov
+	gocov convert profile.cov | gocov-xml > coverage.xml
+endif
 
 ## --------------------------------------
 ## OpenShift specific include

@@ -8,6 +8,10 @@ on:
 jobs:
   build-container:
     runs-on: ubuntu-latest
+
+    env:
+      EXPORT_RESULT: true
+
     steps:
       - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
       - run: echo "🔎 The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
@@ -22,6 +26,15 @@ jobs:
 
       - name: Test build
         run: go build
+
+      - name: Run unit tests
+        run: make unit-test
+
+      - name: Run coverage report
+        run: make coverage
+
+      - name: Codecov
+        uses: codecov/codecov-action@v3.1.4
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@0.11.0
