@@ -28,3 +28,6 @@ go.work
 bin/
 
 _artifacts
+profile.cov
+coverage.xml
+
