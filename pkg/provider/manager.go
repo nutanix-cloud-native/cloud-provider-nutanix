@@ -194,10 +194,8 @@ func (n *nutanixManager) nodeExists(ctx context.Context, node *v1.Node) (bool, e
 		if !strings.Contains(fmt.Sprint(err), "ENTITY_NOT_FOUND") {
 			return false, err
 		}
-		klog.Infof("Node %s does not exist!", node.Name)
 		return false, nil
 	}
-	klog.Infof("Node %s exists!", node.Name)
 	return true, nil
 }
 
@@ -215,10 +213,8 @@ func (n *nutanixManager) isNodeShutdown(ctx context.Context, node *v1.Node) (boo
 		return false, err
 	}
 	if n.isVMShutdown(vm) {
-		klog.Infof("Node %s is shutdown!", node.Name)
 		return true, nil
 	}
-	klog.Infof("Node %s is not shutdown!", node.Name)
 	return false, nil
 }
 
