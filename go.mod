@@ -14,7 +14,7 @@ require (
 	k8s.io/component-base v0.29.1
 	k8s.io/klog/v2 v2.120.1
 	sigs.k8s.io/cluster-api v1.6.0
-	sigs.k8s.io/cluster-api/test v1.6.0
+	sigs.k8s.io/cluster-api/test v1.6.1
 	sigs.k8s.io/controller-runtime v0.17.0
 )
 
@@ -38,7 +38,7 @@ require (
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
-	github.com/cloudflare/circl v1.3.3 // indirect
+	github.com/cloudflare/circl v1.3.7 // indirect
 	github.com/coredns/caddy v1.1.1 // indirect
 	github.com/coreos/go-semver v0.3.1 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
