@@ -30,4 +30,5 @@ bin/
 _artifacts
 profile.cov
 coverage.xml
+.idea/
 
