@@ -55,11 +55,12 @@ func (n *nutanixClient) Get() (interfaces.Prism, error) {
 		return nil, err
 	}
 	creds := &prismgoclient.Credentials{
-		URL:      me.Address.Host, // Not really an URL
-		Endpoint: me.Address.Host,
-		Insecure: me.Insecure,
-		Username: me.ApiCredentials.Username,
-		Password: me.ApiCredentials.Password,
+		URL:         me.Address.Host, // Not really an URL
+		Endpoint:    me.Address.Host,
+		Insecure:    me.Insecure,
+		Username:    me.ApiCredentials.Username,
+		Password:    me.ApiCredentials.Password,
+		SessionAuth: true,
 	}
 
 	clientOpts := make([]prismClientV3.ClientOption, 0)
