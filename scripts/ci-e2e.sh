@@ -12,18 +12,15 @@ cd "${REPO_ROOT}" || exit 1
 apt update
 apt install -y make wget
 
-make --version
-docker --version
+# Install devbox
+curl -fsSL https://get.jetpack.io/devbox | bash -s -- -f
 
-# shellcheck source=./hack/install-go.sh
-source "${REPO_ROOT}/scripts/install-go.sh"
-
-# shellcheck source=./hack/ensure-go.sh
-source "${REPO_ROOT}/scripts/ensure-go.sh"
+# Install tools
+devbox install
 
 # Override e2e conf values with CI specific environment variables
 MAKE_TARGET=${MAKE_TARGET}
-LABEL_FILTERS=${LABEL_FILTERS}
+LABEL_FILTERS="${LABEL_FILTERS}"
 KUBERNETES_VERSION_MANAGEMENT=${KUBERNETES_VERSION_MANAGEMENT}
 NUTANIX_ENDPOINT=${NUTANIX_ENDPOINT}
 NUTANIX_USER=${NUTANIX_USER}
@@ -37,4 +34,4 @@ NUTANIX_MACHINE_TEMPLATE_IMAGE_NAME=${NUTANIX_MACHINE_TEMPLATE_IMAGE_NAME}
 NUTANIX_SUBNET_NAME=${NUTANIX_SUBNET_NAME}
 
 # Run e2e tests
-make ${MAKE_TARGET} LABEL_FILTERS=${LABEL_FILTERS}
+devbox run -- make ${MAKE_TARGET} LABEL_FILTERS="${LABEL_FILTERS}"
