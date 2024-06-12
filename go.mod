@@ -4,7 +4,7 @@ go 1.21
 
 require (
 	github.com/google/uuid v1.5.0
-	github.com/nutanix-cloud-native/prism-go-client v0.3.4
+	github.com/nutanix-cloud-native/prism-go-client v0.4.0
 	github.com/onsi/ginkgo/v2 v2.15.0
 	github.com/onsi/gomega v1.31.1
 	k8s.io/api v0.29.1
