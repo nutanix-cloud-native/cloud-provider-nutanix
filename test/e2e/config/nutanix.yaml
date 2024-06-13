@@ -1,7 +1,7 @@
 ---
 images:
   # Cluster API v1beta1 Preloads
-  - name: ghcr.io/nutanix-cloud-native/cluster-api-provider-nutanix/controller:v1.3.0
+  - name: ghcr.io/nutanix-cloud-native/cluster-api-provider-nutanix/controller:v1.4.0
     loadBehavior: tryLoad
   - name: registry.k8s.io/cluster-api/cluster-api-controller:v1.6.0
     loadBehavior: tryLoad
@@ -55,9 +55,9 @@ providers:
   - name: nutanix
     type: InfrastructureProvider
     versions:
-      - name: v1.3.0
+      - name: v1.4.0
         type: url
-        value: https://github.com/nutanix-cloud-native/cluster-api-provider-nutanix/releases/download/v1.3.0/infrastructure-components.yaml
+        value: https://github.com/nutanix-cloud-native/cluster-api-provider-nutanix/releases/download/v1.4.0/infrastructure-components.yaml
         contract: v1beta1
         files:
           - sourcePath: "../data/capx/metadata.yaml"
@@ -68,7 +68,7 @@ variables:
   # allowing the same e2e config file to be re-used in different Prow jobs e.g. each one with a K8s version permutation.
   # The following Kubernetes versions should be the latest versions with already published kindest/node images.
   # This avoids building node images in the default case which improves the test duration significantly.
-  KUBERNETES_VERSION_MANAGEMENT: "v1.28.0" # Kind nodes are only available for .0 patch releases
+  KUBERNETES_VERSION_MANAGEMENT: "v1.29.2" # Kind nodes are only available for .0 patch releases
   CNI: "./data/cni/kindnet/kindnet.yaml"
   IP_FAMILY: "IPv4"
   CLUSTERCTL_LOG_LEVEL: 10
@@ -80,13 +80,13 @@ variables:
   NUTANIX_PORT: "9440"
   NUTANIX_INSECURE: true
   NUTANIX_ADDITIONAL_TRUST_BUNDLE: ""
-  KUBERNETES_VERSION: "v1.28.5"
+  KUBERNETES_VERSION: "v1.29.2"
   NUTANIX_SSH_AUTHORIZED_KEY: ""
   CONTROL_PLANE_ENDPOINT_IP: ""
   CONTROL_PLANE_MACHINE_COUNT: 3
   WORKER_MACHINE_COUNT: 3
   NUTANIX_PRISM_ELEMENT_CLUSTER_NAME: ""
-  NUTANIX_MACHINE_TEMPLATE_IMAGE_NAME: "ubuntu-2204-kube-v1.28.5.qcow2"
+  NUTANIX_MACHINE_TEMPLATE_IMAGE_NAME: "ubuntu-2204-kube-v1.29.2.qcow2"
   NUTANIX_SUBNET_NAME: ""
   EXP_CLUSTER_RESOURCE_SET: "true"
   CCM_REPO: "ghcr.io/nutanix-cloud-native/cloud-provider-nutanix/controller"
