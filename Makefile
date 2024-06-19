@@ -34,18 +34,19 @@ LOCAL_IMAGE_REGISTRY ?= ko.local
 IMG_NAME ?= nutanix-cloud-controller-manager
 IMG_TAG ?= $(VERSION)
 IMG = $(IMG_NAME):$(IMG_TAG)
+IMG_REPO = $(LOCAL_IMAGE_REGISTRY)/$(IMG_NAME)
 
 LOCALBIN ?= ${REPO_ROOT}/bin
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
 
-.PHONY: ko-build
-ko-build: ## Build the image using ko
-	KO_DOCKER_REPO=$(LOCAL_IMAGE_REGISTRY) ko build -B --platform=${PLATFORMS} -t ${IMG_TAG} -L .
+.PHONY: docker-build
+docker-build: ## Build the image using ko
+	KO_DOCKER_REPO=ko.local ko build -B --platform=${PLATFORMS} -t ${IMG_TAG} -L .
 
 .PHONY: docker-push
 docker-push: ## Build and push the image to the registry
-	KO_DOCKER_REPO=$(LOCAL_IMAGE_REGISTRY) ko build --bare --platform=${PLATFORMS} -t ${IMG_TAG} .
+	KO_DOCKER_REPO=$(IMG_REPO) ko build --bare --platform=${PLATFORMS} -t ${IMG_TAG} .
 
 ##@ Testing
 
@@ -84,7 +85,7 @@ CNI_PATH_CILIUM = "${E2E_DIR}/data/cni/cilium/cilium.yaml" # helm template ciliu
 .PHONY: test-e2e
 test-e2e: docker-push ## Run the e2e tests
 	mkdir -p $(ARTIFACTS)
-	NUTANIX_LOG_LEVEL=debug CNI=$(CNI_PATH_CILIUM) CCM_REPO=$(LOCAL_IMAGE_REGISTRY) CCM_TAG=$(IMG_TAG) ginkgo -v \
+	NUTANIX_LOG_LEVEL=debug CNI=$(CNI_PATH_CILIUM) CCM_REPO=$(IMG_REPO) CCM_TAG=$(IMG_TAG) ginkgo -v \
 		--trace \
 		--tags=e2e \
 		--label-filter=$(LABEL_FILTERS) \
