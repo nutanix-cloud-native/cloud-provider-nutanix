@@ -6,7 +6,7 @@ This repository contains the Kubernetes cloud-controller-manager for Nutanix AHV
 
 ### Build the image
 ```
-make ko-build
+make docker-build
 ```
 
 ### Build and push the image

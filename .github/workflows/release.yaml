@@ -13,10 +13,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: "^1.17"
+      - name: Install devbox
+        run: curl -fsSL https://get.jetpack.io/devbox | bash -s -- -f
+
+      - name: Install devbox deps
+        run: devbox install
 
       - name: Install tools
         uses: redhat-actions/openshift-tools-installer@v1
@@ -25,7 +26,7 @@ jobs:
           ko: "latest"
 
       - name: Login to GHCR
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -33,7 +34,7 @@ jobs:
 
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v4
+        uses: docker/metadata-action@v5
         with:
           images: ccm-nutanix
           sep-tags: ","
@@ -53,7 +54,7 @@ jobs:
         run: |
           PTAGS=`echo $TAGS | sed 's/ccm-nutanix://g'`
           export SOURCE_DATE_EPOCH=$(date +%s)
-          ko build --bare --image-label "$LABELS" -t "$PTAGS" --platform=$PLATFORMS .
+          devbox run -- ko build --bare --image-label "$LABELS" -t "$PTAGS" --platform=$PLATFORMS .
 
       - name: Generate image info
         env:
