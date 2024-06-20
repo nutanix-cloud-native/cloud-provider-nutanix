@@ -1,0 +1,37 @@
+name: Kind Workflow
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on:
+      - self-hosted-ncn-dind
+    strategy:
+      matrix:
+        instance: [1]
+    steps:
+      - name: install packges
+        run: sudo apt-get install -y iputils-ping curl wget
+
+      - name: install kubectl
+        run: curl -LO "https://dl.k8s.io/release/v1.22.0/bin/linux/amd64/kubectl" && chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Run tests
+        run: echo "Running tests for instance ${{ matrix.instance }}"
+
+      - name: Ping prism central
+        run: ping -c 4 prism-korg.nutanix.d2iq.cloud
+
+      - name: docker info
+        run: docker info
+
+      - name: Create k8s Kind Cluster
+        uses: helm/kind-action@v1
+
+      - name: kubectl get nodes
+        run: kubectl get nodes
