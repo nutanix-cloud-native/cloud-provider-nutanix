@@ -11,10 +11,6 @@ jobs:
     env:
       EXPORT_RESULT: true
     steps:
-      - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
-
-      - run: echo "🔎 The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -65,3 +61,16 @@ jobs:
           exit-code: "1"
           vuln-type: "os,library"
           severity: "CRITICAL,HIGH"
+  e2e:
+    strategy:
+      matrix:
+        e2e-labels:
+          - "capx"
+      fail-fast: false
+    uses: ./.github/workflows/e2e.yaml
+    with:
+      e2e-labels: ${{ matrix.e2e-labels }}
+    secrets: inherit
+    permissions:
+      contents: read
+      checks: write

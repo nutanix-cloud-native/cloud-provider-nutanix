@@ -2,7 +2,7 @@
 VERSION = $(shell git describe --tags --always --dirty)
 REPO_ROOT := $(shell git rev-parse --show-toplevel)
 ARTIFACTS ?= ${REPO_ROOT}/_artifacts
-PLATFORMS ?= linux/amd64 
+PLATFORMS ?= linux/amd64
 
 EXPORT_RESULT?=false # for CI please set EXPORT_RESULT to true
 
@@ -98,6 +98,15 @@ test-e2e: docker-push ## Run the e2e tests
 		-e2e.artifacts-folder="$(ARTIFACTS)" \
 		-e2e.config="$(E2E_CONF_FILE)" \
 
+##@ Development
+
+## --------------------------------------
+## Dev
+## --------------------------------------
+
+.PHONY: nutanix-cp-endpoint-ip
+nutanix-cp-endpoint-ip: ## Gets a random free IP from the control plane endpoint range set in the environment.
+	@shuf --head-count=1 < <(fping -g -u "$(CONTROL_PLANE_ENDPOINT_RANGE_START)" "$(CONTROL_PLANE_ENDPOINT_RANGE_END)")
 
 ##@ Deployment
 

@@ -1,13 +1,16 @@
 {
   "packages": [
     "bash@latest",
+    "coreutils@latest",
     "envsubst@1.4.2",
+    "fping@latest",
     "gnumake@4.4.1",
     "ginkgo@2.19.0",
     "go@1.22.2",
     "gotestsum@1.6.4",
     "kind@0.22.0",
     "ko@0.15.2",
+    "kubectl@latest",
     "path:./hack/flakes#go-mod-upgrade",
     "path:./hack/flakes#go-junit-report",
     "path:./hack/flakes#gocov",
