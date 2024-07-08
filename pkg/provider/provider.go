@@ -19,7 +19,6 @@ package provider
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 
 	clientset "k8s.io/client-go/kubernetes"
 	cloudprovider "k8s.io/cloud-provider"
@@ -46,7 +45,7 @@ func init() {
 }
 
 func newNtnxCloud(configReader io.Reader) (cloudprovider.Interface, error) {
-	bytes, err := ioutil.ReadAll(configReader)
+	bytes, err := io.ReadAll(configReader)
 	if err != nil {
 		klog.Infof("Error in initializing %s cloudprovid config %q\n", constants.ProviderName, err)
 		return nil, err

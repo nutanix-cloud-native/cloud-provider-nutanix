@@ -20,17 +20,17 @@ import (
 	"context"
 	"fmt"
 
-	prismgoclient "github.com/nutanix-cloud-native/prism-go-client"
 	"github.com/nutanix-cloud-native/prism-go-client/environment"
-	credentialTypes "github.com/nutanix-cloud-native/prism-go-client/environment/credentials"
-	kubernetesEnv "github.com/nutanix-cloud-native/prism-go-client/environment/providers/kubernetes"
-	envTypes "github.com/nutanix-cloud-native/prism-go-client/environment/types"
-	prismClientV3 "github.com/nutanix-cloud-native/prism-go-client/v3"
+	credentialtypes "github.com/nutanix-cloud-native/prism-go-client/environment/credentials"
+	kubernetesenv "github.com/nutanix-cloud-native/prism-go-client/environment/providers/kubernetes"
+	envtypes "github.com/nutanix-cloud-native/prism-go-client/environment/types"
+	prismclientv3 "github.com/nutanix-cloud-native/prism-go-client/v3"
 	"k8s.io/client-go/informers"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/interfaces"
 )
@@ -38,72 +38,80 @@ import (
 const errEnvironmentNotReady = "environment not initialized or ready yet"
 
 type nutanixClient struct {
-	env               *envTypes.Environment
+	env               envtypes.Environment
 	config            config.Config
 	secretInformer    coreinformers.SecretInformer
 	sharedInformers   informers.SharedInformerFactory
 	configMapInformer coreinformers.ConfigMapInformer
+	clientCache       *prismclientv3.ClientCache
+}
+
+// Key returns the constant client name
+// This implements the CachedClientParams interface of prism-go-client
+func (n *nutanixClient) Key() string {
+	return constants.ClientName
+}
+
+// ManagementEndpoint returns the management endpoint of the Nutanix cluster
+// This implements the CachedClientParams interface of prism-go-client
+func (n *nutanixClient) ManagementEndpoint() envtypes.ManagementEndpoint {
+	if n.env == nil {
+		klog.Error("environment not initialized")
+		return envtypes.ManagementEndpoint{}
+	}
+
+	mgmtEndpoint, err := n.env.GetManagementEndpoint(envtypes.Topology{})
+	if err != nil {
+		klog.Errorf("failed to get management endpoint: %s", err.Error())
+		return envtypes.ManagementEndpoint{}
+	}
+
+	return *mgmtEndpoint
 }
 
 func (n *nutanixClient) Get() (interfaces.Prism, error) {
 	if err := n.setupEnvironment(); err != nil {
-		return nil, fmt.Errorf("%s: %v", errEnvironmentNotReady, err)
-	}
-	env := *n.env
-	me, err := env.GetManagementEndpoint(envTypes.Topology{})
-	if err != nil {
-		return nil, err
-	}
-	creds := &prismgoclient.Credentials{
-		URL:      me.Address.Host, // Not really an URL
-		Endpoint: me.Address.Host,
-		Insecure: me.Insecure,
-		Username: me.ApiCredentials.Username,
-		Password: me.ApiCredentials.Password,
+		return nil, fmt.Errorf("%s: %w", errEnvironmentNotReady, err)
 	}
 
-	clientOpts := make([]prismClientV3.ClientOption, 0)
-	if me.AdditionalTrustBundle != "" {
-		clientOpts = append(clientOpts, prismClientV3.WithPEMEncodedCertBundle([]byte(me.AdditionalTrustBundle)))
+	if n.clientCache == nil {
+		return nil, fmt.Errorf("%s: client cache not initialized", errEnvironmentNotReady)
 	}
 
-	nutanixClient, err := prismClientV3.NewV3Client(*creds, clientOpts...)
+	client, err := n.clientCache.GetOrCreate(n)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = nutanixClient.V3.GetCurrentLoggedInUser(context.Background())
-	if err != nil {
-		return nil, err
-	}
-
-	return nutanixClient.V3, nil
+	return client.V3, nil
 }
 
 func (n *nutanixClient) setupEnvironment() error {
 	if n.env != nil {
 		return nil
 	}
+
 	ccmNamespace, err := GetCCMNamespace()
 	if err != nil {
 		return err
 	}
+
 	pc := n.config.PrismCentral
 	if pc.CredentialRef != nil {
 		if pc.CredentialRef.Namespace == "" {
 			pc.CredentialRef.Namespace = ccmNamespace
 		}
 	}
+
 	additionalTrustBundleRef := pc.AdditionalTrustBundle
 	if additionalTrustBundleRef != nil &&
-		additionalTrustBundleRef.Kind == credentialTypes.NutanixTrustBundleKindConfigMap &&
+		additionalTrustBundleRef.Kind == credentialtypes.NutanixTrustBundleKindConfigMap &&
 		additionalTrustBundleRef.Namespace == "" {
 		additionalTrustBundleRef.Namespace = ccmNamespace
 	}
 
-	env := environment.NewEnvironment(kubernetesEnv.NewProvider(pc,
-		n.secretInformer, n.configMapInformer))
-	n.env = &env
+	n.env = environment.NewEnvironment(kubernetesenv.NewProvider(pc, n.secretInformer, n.configMapInformer))
+
 	return nil
 }
 
