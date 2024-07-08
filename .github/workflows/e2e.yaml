@@ -24,7 +24,7 @@ jobs:
       - name: Install devbox
         uses: jetify-com/devbox-install-action@v0.11.0
         with:
-          enable-cache: "true"
+          enable-cache: "false"
           skip-nix-installation: "true"
 
       - uses: actions/cache@v4
