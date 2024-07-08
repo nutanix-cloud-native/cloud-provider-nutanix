@@ -14,7 +14,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - uses: actions/cache@v3
+      - name: Install devbox
+        uses: jetify-com/devbox-install-action@v0.11.0
+        with:
+          enable-cache: "true"
+
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cache/golangci-lint
@@ -23,12 +28,6 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
-
-      - name: Install devbox
-        run: curl -fsSL https://get.jetpack.io/devbox | bash -s -- -f
-
-      - name: Install devbox deps
-        run: devbox install
 
       - name: Test build
         run: devbox run -- make build
@@ -45,7 +44,7 @@ jobs:
         run: devbox run -- make coverage
 
       - name: Codecov
-        uses: codecov/codecov-action@v3.1.4
+        uses: codecov/codecov-action@v4.5.0
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
