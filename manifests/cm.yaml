@@ -20,5 +20,5 @@ data:
       "topologyDiscovery": {
         "type": "Prism"
       },
-      "ignoredNodeIPs": ["${IGNORED_NODE_IPS:=}"]
+      "ignoredNodeIPs": []
     }
