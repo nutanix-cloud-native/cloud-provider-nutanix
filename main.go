@@ -51,6 +51,7 @@ func main() {
 
 	command := app.NewCloudControllerManagerCommand(ccmOptions,
 		cloudInitializer, controllerInitializers, map[string]string{}, fss, wait.NeverStop)
+
 	code := cli.Run(command)
 	os.Exit(code)
 }

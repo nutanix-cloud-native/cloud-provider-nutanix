@@ -35,19 +35,28 @@ import (
 )
 
 type nutanixManager struct {
-	client        clientset.Interface
-	config        config.Config
-	nutanixClient interfaces.Client
+	client         clientset.Interface
+	config         config.Config
+	nutanixClient  interfaces.Client
+	ignoredNodeIPs map[string]struct{}
 }
 
 func newNutanixManager(config config.Config) (*nutanixManager, error) {
 	klog.V(1).Info("Creating new newNutanixManager")
+
+	// Initialize the ignoredNodeIPs map
+	ignoredNodeIPs := make(map[string]struct{}, len(config.IgnoredNodeIPs))
+	for _, ip := range config.IgnoredNodeIPs {
+		ignoredNodeIPs[ip] = struct{}{}
+	}
+
 	m := &nutanixManager{
 		config: config,
 		nutanixClient: &nutanixClient{
 			config:      config,
 			clientCache: prismclientv3.NewClientCache(prismclientv3.WithSessionAuth(true)),
 		},
+		ignoredNodeIPs: ignoredNodeIPs,
 	}
 	return m, nil
 }
@@ -262,26 +271,29 @@ func (n *nutanixManager) generateProviderID(ctx context.Context, vmUUID string) 
 	return fmt.Sprintf("%s://%s", constants.ProviderName, strings.ToLower(vmUUID)), nil
 }
 
-func (n *nutanixManager) getNodeAddresses(ctx context.Context, vm *prismclientv3.VMIntentResponse) ([]v1.NodeAddress, error) {
+func (n *nutanixManager) getNodeAddresses(_ context.Context, vm *prismclientv3.VMIntentResponse) ([]v1.NodeAddress, error) {
 	if vm == nil {
 		return nil, fmt.Errorf("vm cannot be nil when getting node addresses")
 	}
-	addresses := make([]v1.NodeAddress, 0)
-	foundIPs := 0
+
+	var addresses []v1.NodeAddress
 	for _, nic := range vm.Status.Resources.NicList {
 		for _, ipEndpoint := range nic.IPEndpointList {
 			if ipEndpoint.IP != nil {
-				addresses = append(addresses, v1.NodeAddress{
-					Type:    v1.NodeInternalIP,
-					Address: *ipEndpoint.IP,
-				})
-				foundIPs++
+				// Ignore the IP address if it is one of the specified ignoredNodeIPs.
+				if _, ok := n.ignoredNodeIPs[*ipEndpoint.IP]; !ok {
+					addresses = append(addresses, v1.NodeAddress{
+						Type:    v1.NodeInternalIP,
+						Address: *ipEndpoint.IP,
+					})
+				}
 			}
 		}
 	}
-	if foundIPs == 0 {
+	if len(addresses) == 0 {
 		return addresses, fmt.Errorf("unable to determine network interfaces from VM with UUID %s", *vm.Metadata.UUID)
 	}
+
 	addresses = append(addresses, v1.NodeAddress{
 		Type:    v1.NodeHostName,
 		Address: *vm.Spec.Name,

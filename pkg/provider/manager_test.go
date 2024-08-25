@@ -59,9 +59,14 @@ var _ = Describe("Test Manager", func() {
 						ZoneCategory:   mock.MockDefaultZone,
 					},
 				},
+				IgnoredNodeIPs: []string{"127.100.100.1", "127.200.200.1"},
 			},
 			client:        kClient,
 			nutanixClient: nutanixClient,
+			ignoredNodeIPs: map[string]struct{}{
+				"127.100.100.1": struct{}{},
+				"127.200.200.1": struct{}{},
+			},
 		}
 	})
 
@@ -145,6 +150,15 @@ var _ = Describe("Test Manager", func() {
 					),
 				),
 			)
+		})
+
+		It("should filter node addresses if matching specified filtered addresses", func() {
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameFilteredNodeAddresses)
+			Expect(vm).ToNot(BeNil())
+			addresses, err := m.getNodeAddresses(ctx, vm)
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(len(addresses)).To(Equal(2), "Received addresses: %v", addresses)
+			Expect(addresses).Should(ContainElement(v1.NodeAddress{Type: v1.NodeInternalIP, Address: "127.300.300.1"}))
 		})
 	})
 

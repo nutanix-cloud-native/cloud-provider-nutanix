@@ -19,5 +19,6 @@ data:
       "enableCustomLabeling": false,
       "topologyDiscovery": {
         "type": "Prism"
-      }
+      },
+      "ignoredNodeIPs": []
     }

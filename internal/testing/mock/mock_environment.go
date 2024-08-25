@@ -25,6 +25,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/utils/ptr"
 
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
 )
@@ -109,6 +110,21 @@ func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockE
 		return nil, err
 	}
 
+	filteredAddressesVM := getDefaultVMSpec(MockVMNameFilteredNodeAddresses, cluster)
+	filteredAddressesVM.Status.Resources.NicList = []*prismClientV3.VMNicOutputStatus{{
+		IPEndpointList: []*prismClientV3.IPAddress{{
+			IP: ptr.To("127.100.100.1"),
+		}, {
+			IP: ptr.To("127.200.200.1"),
+		}, {
+			IP: ptr.To("127.300.300.1"),
+		}},
+	}}
+	filteredAddressesNode, err := createNodeForVM(ctx, kClient, filteredAddressesVM)
+	if err != nil {
+		return nil, err
+	}
+
 	nonExistingVMNode := &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: MockNodeNameVMNotExisting,
@@ -139,6 +155,7 @@ func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockE
 			*categoriesVM.Metadata.UUID:                 categoriesVM,
 			*noAddressesVM.Metadata.UUID:                noAddressesVM,
 			*poweredOnVMClusterCategories.Metadata.UUID: poweredOnVMClusterCategories,
+			*filteredAddressesVM.Metadata.UUID:          filteredAddressesVM,
 		},
 		managedMockClusters: map[string]*prismClientV3.ClusterIntentResponse{
 			*cluster.Metadata.UUID:           cluster,
@@ -153,6 +170,7 @@ func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockE
 			MockNodeNameVMNotExisting:            nonExistingVMNode,
 			MockNodeNameNoSystemUUID:             noSystemUUIDNode,
 			MockVMNamePoweredOnClusterCategories: poweredOnClusterCategoriesNode,
+			MockVMNameFilteredNodeAddresses:      filteredAddressesNode,
 		},
 	}, nil
 }
