@@ -30,6 +30,7 @@ const (
 	MockVMNamePoweredOff                 = "mock-vm-poweredoff"
 	MockVMNameCategories                 = "mock-vm-categories"
 	MockVMNameNoAddresses                = "mock-vm-no-addresses"
+	MockVMNameFilteredNodeAddresses      = "mock-vm-filtered-node-addresses"
 	MockVMNamePoweredOnClusterCategories = "mock-vm-poweredon-cluster-categories"
 
 	MockNodeNameVMNotExisting = "mock-node-no-vm-exists"
