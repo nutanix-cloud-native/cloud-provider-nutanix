@@ -117,7 +117,7 @@ func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockE
 		}, {
 			IP: ptr.To("127.200.200.1"),
 		}, {
-			IP: ptr.To("127.300.300.1"),
+			IP: ptr.To(MockIP),
 		}},
 	}}
 	filteredAddressesNode, err := createNodeForVM(ctx, kClient, filteredAddressesVM)

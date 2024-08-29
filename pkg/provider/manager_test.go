@@ -158,7 +158,9 @@ var _ = Describe("Test Manager", func() {
 			addresses, err := m.getNodeAddresses(ctx, vm)
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(len(addresses)).To(Equal(2), "Received addresses: %v", addresses)
-			Expect(addresses).Should(ContainElement(v1.NodeAddress{Type: v1.NodeInternalIP, Address: "127.300.300.1"}))
+			Expect(addresses).Should(ContainElement(v1.NodeAddress{Type: v1.NodeInternalIP, Address: mock.MockIP}))
+			Expect(addresses).ShouldNot(ContainElement(v1.NodeAddress{Type: v1.NodeInternalIP, Address: "127.100.100.1"}))
+			Expect(addresses).ShouldNot(ContainElement(v1.NodeAddress{Type: v1.NodeInternalIP, Address: "127.200.200.1"}))
 		})
 	})
 
