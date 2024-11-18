@@ -39,7 +39,9 @@ jobs:
           devbox run -- ko build -B -t ${{ github.sha }} --platform=$PLATFORMS .
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@0.29.0
+        env:
+          TRIVY_DB_REPOSITORY: "ghcr.io/aquasecurity/trivy-db,public.ecr.aws/aquasecurity/trivy-db"
         with:
           image-ref: "ko.local/${{ env.REPOSITORY_NAME }}:${{ github.sha }}"
           format: "sarif"
