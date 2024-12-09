@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"go4.org/netipx"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/client-go/kubernetes/fake"
@@ -67,9 +68,10 @@ var _ = Describe("Test InstancesV2", func() {
 		}
 		i = instancesV2{
 			nutanixManager: &nutanixManager{
-				config:        categoryTopologyConfig,
-				client:        kClient,
-				nutanixClient: mock.CreateMockClient(*mockEnvironment),
+				config:         categoryTopologyConfig,
+				client:         kClient,
+				nutanixClient:  mock.CreateMockClient(*mockEnvironment),
+				ignoredNodeIPs: &netipx.IPSet{},
 			},
 		}
 	})

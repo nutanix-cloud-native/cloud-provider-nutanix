@@ -50,8 +50,8 @@ var _ = Describe("Test Manager", func() {
 		nutanixClient := mock.CreateMockClient(*mockEnvironment)
 		nClient, err = nutanixClient.Get()
 		Expect(err).ToNot(HaveOccurred())
-		m = nutanixManager{
-			config: config.Config{
+		mgr, err := newNutanixManager(
+			config.Config{
 				TopologyDiscovery: config.TopologyDiscovery{
 					Type: config.CategoriesTopologyDiscoveryType,
 					TopologyCategories: &config.TopologyCategories{
@@ -59,15 +59,13 @@ var _ = Describe("Test Manager", func() {
 						ZoneCategory:   mock.MockDefaultZone,
 					},
 				},
-				IgnoredNodeIPs: []string{"127.100.100.1", "127.200.200.1"},
+				IgnoredNodeIPs: []string{"127.100.10.1", "127.200.20.1", "127.200.100.1/24", "127.200.200.1-127.200.200.10"},
 			},
-			client:        kClient,
-			nutanixClient: nutanixClient,
-			ignoredNodeIPs: map[string]struct{}{
-				"127.100.100.1": struct{}{},
-				"127.200.200.1": struct{}{},
-			},
-		}
+		)
+		Expect(err).ShouldNot(HaveOccurred())
+		mgr.client = kClient
+		mgr.nutanixClient = nutanixClient
+		m = *mgr
 	})
 
 	Context("Test HasEmptyTopologyInfo", func() {
@@ -158,9 +156,10 @@ var _ = Describe("Test Manager", func() {
 			addresses, err := m.getNodeAddresses(ctx, vm)
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(len(addresses)).To(Equal(2), "Received addresses: %v", addresses)
-			Expect(addresses).Should(ContainElement(v1.NodeAddress{Type: v1.NodeInternalIP, Address: mock.MockIP}))
-			Expect(addresses).ShouldNot(ContainElement(v1.NodeAddress{Type: v1.NodeInternalIP, Address: "127.100.100.1"}))
-			Expect(addresses).ShouldNot(ContainElement(v1.NodeAddress{Type: v1.NodeInternalIP, Address: "127.200.200.1"}))
+			Expect(addresses).Should(ConsistOf(
+				v1.NodeAddress{Type: v1.NodeInternalIP, Address: mock.MockIP},
+				v1.NodeAddress{Type: v1.NodeHostName, Address: *vm.Spec.Name},
+			))
 		})
 	})
 

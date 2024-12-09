@@ -113,9 +113,13 @@ func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockE
 	filteredAddressesVM := getDefaultVMSpec(MockVMNameFilteredNodeAddresses, cluster)
 	filteredAddressesVM.Status.Resources.NicList = []*prismClientV3.VMNicOutputStatus{{
 		IPEndpointList: []*prismClientV3.IPAddress{{
-			IP: ptr.To("127.100.100.1"),
+			IP: ptr.To("127.100.10.1"),
 		}, {
-			IP: ptr.To("127.200.200.1"),
+			IP: ptr.To("127.200.20.1"),
+		}, {
+			IP: ptr.To("127.200.100.64"),
+		}, {
+			IP: ptr.To("127.200.200.10"),
 		}, {
 			IP: ptr.To(MockIP),
 		}},
