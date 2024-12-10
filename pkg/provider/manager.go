@@ -56,17 +56,18 @@ func newNutanixManager(config config.Config) (*nutanixManager, error) {
 				return nil, fmt.Errorf("failed to parse ignoredNodeIPs IP range %q: %v", ip, err)
 			}
 			ignoredIPsBuilder.AddRange(ipRange)
-		default:
+		case strings.Contains(ip, "/"):
 			prefix, err := netip.ParsePrefix(ip)
-			if err == nil {
-				ignoredIPsBuilder.AddPrefix(prefix)
-			} else {
-				parsedIP, err := netip.ParseAddr(ip)
-				if err != nil {
-					return nil, fmt.Errorf("failed to parse ignoredNodeIPs IP %q: %v", ip, err)
-				}
-				ignoredIPsBuilder.Add(parsedIP)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse ignoredNodeIPs IP prefix %q: %v", ip, err)
 			}
+			ignoredIPsBuilder.AddPrefix(prefix)
+		default:
+			parsedIP, err := netip.ParseAddr(ip)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse ignoredNodeIPs IP %q: %v", ip, err)
+			}
+			ignoredIPsBuilder.Add(parsedIP)
 		}
 	}
 
