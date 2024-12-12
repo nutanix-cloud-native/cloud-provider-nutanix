@@ -19,9 +19,11 @@ package provider
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"strings"
 
 	prismclientv3 "github.com/nutanix-cloud-native/prism-go-client/v3"
+	"go4.org/netipx"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
@@ -38,16 +40,40 @@ type nutanixManager struct {
 	client         clientset.Interface
 	config         config.Config
 	nutanixClient  interfaces.Client
-	ignoredNodeIPs map[string]struct{}
+	ignoredNodeIPs *netipx.IPSet
 }
 
 func newNutanixManager(config config.Config) (*nutanixManager, error) {
 	klog.V(1).Info("Creating new newNutanixManager")
 
-	// Initialize the ignoredNodeIPs map
-	ignoredNodeIPs := make(map[string]struct{}, len(config.IgnoredNodeIPs))
+	// Initialize the ignoredNodeIPs set
+	ignoredIPsBuilder := netipx.IPSetBuilder{}
 	for _, ip := range config.IgnoredNodeIPs {
-		ignoredNodeIPs[ip] = struct{}{}
+		switch {
+		case strings.Contains(ip, "-"):
+			ipRange, err := netipx.ParseIPRange(ip)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse ignoredNodeIPs IP range %q: %v", ip, err)
+			}
+			ignoredIPsBuilder.AddRange(ipRange)
+		case strings.Contains(ip, "/"):
+			prefix, err := netip.ParsePrefix(ip)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse ignoredNodeIPs IP prefix %q: %v", ip, err)
+			}
+			ignoredIPsBuilder.AddPrefix(prefix)
+		default:
+			parsedIP, err := netip.ParseAddr(ip)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse ignoredNodeIPs IP %q: %v", ip, err)
+			}
+			ignoredIPsBuilder.Add(parsedIP)
+		}
+	}
+
+	ignoredIPSet, err := ignoredIPsBuilder.IPSet()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build ignoredNodeIPs IP set: %v", err)
 	}
 
 	m := &nutanixManager{
@@ -56,7 +82,7 @@ func newNutanixManager(config config.Config) (*nutanixManager, error) {
 			config:      config,
 			clientCache: prismclientv3.NewClientCache(prismclientv3.WithSessionAuth(true)),
 		},
-		ignoredNodeIPs: ignoredNodeIPs,
+		ignoredNodeIPs: ignoredIPSet,
 	}
 	return m, nil
 }
@@ -280,8 +306,12 @@ func (n *nutanixManager) getNodeAddresses(_ context.Context, vm *prismclientv3.V
 	for _, nic := range vm.Status.Resources.NicList {
 		for _, ipEndpoint := range nic.IPEndpointList {
 			if ipEndpoint.IP != nil {
+				parsedIP, err := netip.ParseAddr(*ipEndpoint.IP)
+				if err != nil {
+					return addresses, fmt.Errorf("failed to parse IP address %q: %v", *ipEndpoint.IP, err)
+				}
 				// Ignore the IP address if it is one of the specified ignoredNodeIPs.
-				if _, ok := n.ignoredNodeIPs[*ipEndpoint.IP]; !ok {
+				if !n.ignoredNodeIPs.Contains(parsedIP) {
 					addresses = append(addresses, v1.NodeAddress{
 						Type:    v1.NodeInternalIP,
 						Address: *ipEndpoint.IP,
