@@ -22,7 +22,7 @@ import (
 
 	"github.com/nutanix-cloud-native/prism-go-client/environment/credentials"
 	"github.com/nutanix-cloud-native/prism-go-client/environment/providers/local"
-	prismclientv3 "github.com/nutanix-cloud-native/prism-go-client/v3"
+	prismclientv4 "github.com/nutanix-cloud-native/prism-go-client/v4"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/client-go/informers"
@@ -120,7 +120,7 @@ var _ = Describe("Test Client", func() {
 			Expect(err).To(BeNil())
 			defer os.Unsetenv("NUTANIX_ENDPOINT")
 			nClient.env = p
-			nClient.clientCache = prismclientv3.NewClientCache(prismclientv3.WithSessionAuth(false))
+			nClient.clientCache = prismclientv4.NewClientCache(prismclientv4.WithSessionAuth(false))
 			client, err := nClient.Get()
 			Expect(err).ToNot(BeNil())
 			Expect(client).To(BeNil())
@@ -141,7 +141,7 @@ var _ = Describe("Test Client", func() {
 			defer os.Unsetenv("NUTANIX_PASSWORD")
 
 			nClient.env = p
-			nClient.clientCache = prismclientv3.NewClientCache(prismclientv3.WithSessionAuth(false))
+			nClient.clientCache = prismclientv4.NewClientCache(prismclientv4.WithSessionAuth(false))
 			client, err := nClient.Get()
 			Expect(err).To(BeNil())
 			Expect(client).ToNot(BeNil())

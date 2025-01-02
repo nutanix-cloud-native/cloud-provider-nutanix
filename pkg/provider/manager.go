@@ -18,11 +18,16 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"k8s.io/utils/ptr"
 	"net/netip"
 	"strings"
 
-	prismclientv3 "github.com/nutanix-cloud-native/prism-go-client/v3"
+	prismclientv4 "github.com/nutanix-cloud-native/prism-go-client/v4"
+	clustermgmtconfig "github.com/nutanix/ntnx-api-golang-clients/clustermgmt-go-client/v4/models/clustermgmt/v4/config"
+	prismconfig "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/prism/v4/config"
+	vmmconfig "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/vmm/v4/ahv/config"
 	"go4.org/netipx"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
@@ -33,13 +38,12 @@ import (
 
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
-	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/interfaces"
 )
 
 type nutanixManager struct {
 	client         clientset.Interface
 	config         config.Config
-	nutanixClient  interfaces.Client
+	nutanixClient  *nutanixClient
 	ignoredNodeIPs *netipx.IPSet
 }
 
@@ -80,27 +84,27 @@ func newNutanixManager(config config.Config) (*nutanixManager, error) {
 		config: config,
 		nutanixClient: &nutanixClient{
 			config:      config,
-			clientCache: prismclientv3.NewClientCache(prismclientv3.WithSessionAuth(true)),
+			clientCache: prismclientv4.NewClientCache(prismclientv4.WithSessionAuth(true)),
 		},
 		ignoredNodeIPs: ignoredIPSet,
 	}
 	return m, nil
 }
 
-func (nc *nutanixManager) setKubernetesClient(client clientset.Interface) {
-	nc.client = client
-	nc.setInformers()
+func (n *nutanixManager) setKubernetesClient(client clientset.Interface) {
+	n.client = client
+	n.setInformers()
 }
 
-func (nc *nutanixManager) setInformers() {
+func (n *nutanixManager) setInformers() {
 	// Set the nutanixClient's informersFactory with the ccm namespace
 	ccmNamespace, err := GetCCMNamespace()
 	if err != nil {
 		klog.Fatal(err.Error())
 	}
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(
-		nc.client, NoResyncPeriodFunc(), informers.WithNamespace(ccmNamespace))
-	nc.nutanixClient.SetInformers(informerFactory)
+		n.client, NoResyncPeriodFunc(), informers.WithNamespace(ccmNamespace))
+	n.nutanixClient.SetInformers(informerFactory)
 
 	klog.Infof("Set the informers with namespace %q", ccmNamespace)
 }
@@ -122,22 +126,29 @@ func (n *nutanixManager) getInstanceMetadata(ctx context.Context, node *v1.Node)
 	if err != nil {
 		return nil, err
 	}
+
 	nClient, err := n.nutanixClient.Get()
 	if err != nil {
 		return nil, err
 	}
-	vm, err := nClient.GetVM(ctx, vmUUID)
+
+	getVMResp, err := nClient.VmApiInstance.GetVmById(ptr.To(vmUUID))
 	if err != nil {
 		return nil, err
+	}
+
+	vm, ok := getVMResp.GetData().(*vmmconfig.Vm)
+	if !ok {
+		return nil, fmt.Errorf("failed to cast VM entity to VM type")
 	}
 
 	klog.V(1).Infof("fetching nodeAddresses for node %s", nodeName)
-	nodeAddresses, err := n.getNodeAddresses(ctx, vm)
+	nodeAddresses, err := n.getNodeAddresses(vm)
 	if err != nil {
 		return nil, err
 	}
 
-	topologyInfo, err := n.getTopologyInfo(ctx, nClient, vm)
+	topologyInfo, err := n.getTopologyInfo(ctx, vm)
 	if err != nil {
 		return nil, err
 	}
@@ -149,6 +160,7 @@ func (n *nutanixManager) getInstanceMetadata(ctx context.Context, node *v1.Node)
 			return nil, err
 		}
 	}
+
 	return &cloudprovider.InstanceMetadata{
 		ProviderID:    providerID,
 		InstanceType:  constants.InstanceType,
@@ -169,44 +181,70 @@ func (n *nutanixManager) addCustomLabelsToNode(ctx context.Context, node *v1.Nod
 		return err
 	}
 	vmUUID := n.stripNutanixIDFromProviderID(providerID)
-	vm, err := nClient.GetVM(ctx, vmUUID)
+	getVMResp, err := nClient.VmApiInstance.GetVmById(&vmUUID)
 	if err != nil {
 		return err
 	}
-	if vm.Status.ClusterReference != nil &&
-		vm.Status.ClusterReference.UUID != nil &&
-		vm.Status.ClusterReference.Name != nil {
-		labels[constants.CustomPEUUIDLabel] = *vm.Status.ClusterReference.UUID
-		labels[constants.CustomPENameLabel] = *vm.Status.ClusterReference.Name
+
+	vm, ok := getVMResp.GetData().(*vmmconfig.Vm)
+	if !ok {
+		return fmt.Errorf("failed to cast VM entity to VM type")
 	}
-	if vm.Status.Resources.HostReference != nil &&
-		vm.Status.Resources.HostReference.UUID != nil &&
-		vm.Status.Resources.HostReference.Name != nil {
-		labels[constants.CustomHostUUIDLabel] = *vm.Status.Resources.HostReference.UUID
-		labels[constants.CustomHostNameLabel] = *vm.Status.Resources.HostReference.Name
+
+	getClusterResp, err := nClient.ClustersApiInstance.GetClusterById(vm.Cluster.ExtId, nil)
+	if err != nil {
+		return fmt.Errorf("error occurred while fetching cluster for VM %s: %v", *vm.Name, err)
+	}
+
+	cluster, ok := getClusterResp.GetData().(*clustermgmtconfig.Cluster)
+	if !ok {
+		return fmt.Errorf("failed to cast cluster entity to cluster type")
+	}
+
+	if cluster != nil &&
+		cluster.ExtId != nil &&
+		cluster.Name != nil {
+		labels[constants.CustomPEUUIDLabel] = *cluster.ExtId
+		labels[constants.CustomPENameLabel] = *cluster.Name
+
+		getHostResp, err := nClient.ClustersApiInstance.GetHostById(cluster.ExtId, vm.Host.ExtId)
+		if err != nil {
+			return fmt.Errorf("error occurred while fetching host for VM %s: %v", *vm.Name, err)
+		}
+
+		host, ok := getHostResp.GetData().(*clustermgmtconfig.Host)
+		if !ok {
+			return fmt.Errorf("failed to cast host entity to host type")
+		}
+
+		labels[constants.CustomHostUUIDLabel] = *host.ExtId
+		labels[constants.CustomHostNameLabel] = *host.HostName
 	}
 
 	result := helpers.AddOrUpdateLabelsOnNode(n.client, labels, node)
 	if !result {
 		return fmt.Errorf("error occurred while updating labels on node %s", node.Name)
 	}
+
 	return nil
 }
 
-func (n *nutanixManager) getTopologyCategories() (config.TopologyCategories, error) {
-	topologyCategories := config.TopologyCategories{}
+func (n *nutanixManager) getTopologyCategories() (*config.TopologyCategories, error) {
 	configTopologyCategories := n.config.TopologyDiscovery.TopologyCategories
 	if n.config.TopologyDiscovery.Type != config.CategoriesTopologyDiscoveryType {
-		return topologyCategories, fmt.Errorf("cannot invoke getTopologyCategories if topology discovery type is not %s", config.CategoriesTopologyDiscoveryType)
-	}
-	if n.config.TopologyDiscovery.TopologyCategories == nil {
-		return topologyCategories, fmt.Errorf("topologyCategories must be set when using categories to discover topology")
+		return nil, fmt.Errorf("cannot invoke getTopologyCategories if topology discovery type is not %s", config.CategoriesTopologyDiscoveryType)
 	}
 
+	if n.config.TopologyDiscovery.TopologyCategories == nil {
+		return nil, fmt.Errorf("topologyCategories must be set when using categories to discover topology")
+	}
+
+	topologyCategories := &config.TopologyCategories{}
 	if configTopologyCategories.RegionCategory != "" {
 		klog.V(1).Infof("using category key %s to detect region", configTopologyCategories.RegionCategory)
 		topologyCategories.RegionCategory = configTopologyCategories.RegionCategory
 	}
+
 	if configTopologyCategories.ZoneCategory != "" {
 		klog.V(1).Infof("using category key %s to detect zone", configTopologyCategories.ZoneCategory)
 		topologyCategories.ZoneCategory = configTopologyCategories.ZoneCategory
@@ -221,17 +259,20 @@ func (n *nutanixManager) nodeExists(ctx context.Context, node *v1.Node) (bool, e
 	if err != nil {
 		return false, err
 	}
+
 	nClient, err := n.nutanixClient.Get()
 	if err != nil {
 		return false, err
 	}
-	_, err = nClient.GetVM(ctx, vmUUID)
+
+	_, err = nClient.VmApiInstance.GetVmById(&vmUUID)
 	if err != nil {
 		if !strings.Contains(fmt.Sprint(err), "ENTITY_NOT_FOUND") {
 			return false, err
 		}
 		return false, nil
 	}
+
 	return true, nil
 }
 
@@ -240,22 +281,31 @@ func (n *nutanixManager) isNodeShutdown(ctx context.Context, node *v1.Node) (boo
 	if err != nil {
 		return false, err
 	}
+
 	nClient, err := n.nutanixClient.Get()
 	if err != nil {
 		return false, err
 	}
-	vm, err := nClient.GetVM(ctx, vmUUID)
+
+	getVMResp, err := nClient.VmApiInstance.GetVmById(&vmUUID)
 	if err != nil {
 		return false, err
 	}
+
+	vm, ok := getVMResp.GetData().(*vmmconfig.Vm)
+	if !ok {
+		return false, fmt.Errorf("failed to cast VM entity to VM type")
+	}
+
 	if n.isVMShutdown(vm) {
 		return true, nil
 	}
+
 	return false, nil
 }
 
-func (n *nutanixManager) isVMShutdown(vm *prismclientv3.VMIntentResponse) bool {
-	return *vm.Spec.Resources.PowerState == constants.PoweredOffState
+func (n *nutanixManager) isVMShutdown(vm *vmmconfig.Vm) bool {
+	return vm.PowerState.GetName() == constants.PoweredOffState
 }
 
 func (n *nutanixManager) getNutanixInstanceIDForNode(ctx context.Context, node *v1.Node) (string, error) {
@@ -297,153 +347,236 @@ func (n *nutanixManager) generateProviderID(ctx context.Context, vmUUID string) 
 	return fmt.Sprintf("%s://%s", constants.ProviderName, strings.ToLower(vmUUID)), nil
 }
 
-func (n *nutanixManager) getNodeAddresses(_ context.Context, vm *prismclientv3.VMIntentResponse) ([]v1.NodeAddress, error) {
+func (n *nutanixManager) getNodeAddresses(vm *vmmconfig.Vm) ([]v1.NodeAddress, error) {
 	if vm == nil {
 		return nil, fmt.Errorf("vm cannot be nil when getting node addresses")
 	}
 
-	var addresses []v1.NodeAddress
-	for _, nic := range vm.Status.Resources.NicList {
-		for _, ipEndpoint := range nic.IPEndpointList {
-			if ipEndpoint.IP != nil {
-				parsedIP, err := netip.ParseAddr(*ipEndpoint.IP)
+	var nodeAddresses []v1.NodeAddress
+	for _, nic := range vm.Nics {
+		var addresses []v1.NodeAddress
+		if nic.NetworkInfo.Ipv4Config.IpAddress != nil {
+			if nic.NetworkInfo.Ipv4Config.IpAddress.Value != nil {
+				parsedIP, err := netip.ParseAddr(*nic.NetworkInfo.Ipv4Config.IpAddress.Value)
 				if err != nil {
-					return addresses, fmt.Errorf("failed to parse IP address %q: %v", *ipEndpoint.IP, err)
+					return nodeAddresses, fmt.Errorf("failed to parse IP address %q: %v", *nic.NetworkInfo.Ipv4Config.IpAddress.Value, err)
+				}
+
+				// Ignore the IP address if it is one of the specified ignoredNodeIPs.
+				if !n.ignoredNodeIPs.Contains(parsedIP) {
+					addresses = append(addresses, v1.NodeAddress{
+						Type:    v1.NodeInternalIP,
+						Address: *nic.NetworkInfo.Ipv4Config.IpAddress.Value,
+					})
+				}
+			}
+		}
+
+		for _, ipEndpoint := range nic.NetworkInfo.Ipv4Config.SecondaryIpAddressList {
+			if ipEndpoint.Value != nil {
+				parsedIP, err := netip.ParseAddr(*ipEndpoint.Value)
+				if err != nil {
+					return nodeAddresses, fmt.Errorf("failed to parse IP address %q: %v", *ipEndpoint.Value, err)
 				}
 				// Ignore the IP address if it is one of the specified ignoredNodeIPs.
 				if !n.ignoredNodeIPs.Contains(parsedIP) {
 					addresses = append(addresses, v1.NodeAddress{
 						Type:    v1.NodeInternalIP,
-						Address: *ipEndpoint.IP,
+						Address: *ipEndpoint.Value,
 					})
 				}
 			}
 		}
-	}
-	if len(addresses) == 0 {
-		return addresses, fmt.Errorf("unable to determine network interfaces from VM with UUID %s", *vm.Metadata.UUID)
+
+		// if no addresses were found assigned to the NIC, use the first IP address from learned IP addresses and assign it to the NIC
+		if len(addresses) == 0 && len(nic.NetworkInfo.Ipv4Info.LearnedIpAddresses) > 0 {
+			learnedIP := nic.NetworkInfo.Ipv4Info.LearnedIpAddresses[0]
+			nc, err := n.nutanixClient.Get()
+			if err != nil {
+				return nil, err
+			}
+
+			resp, err := nc.VmApiInstance.AssignIpById(vm.ExtId, nic.ExtId, &vmmconfig.AssignIpParams{IpAddress: &learnedIP})
+			if err != nil {
+				return nil, err
+			}
+
+			task, ok := resp.GetData().(prismconfig.TaskReference)
+			if !ok {
+				return nil, fmt.Errorf("failed to assign IP address to VM %s", *vm.Name)
+			}
+
+			if task.ExtId == nil {
+				return nil, fmt.Errorf("failed to assign IP address to VM %s", *vm.Name)
+			}
+
+			_, err = nc.TasksApiInstance.GetTaskById(task.ExtId, nil)
+			if err != nil {
+				switch {
+				case errors.Is(err, ErrTaskOngoing),
+					errors.Is(err, ErrTaskFailed),
+					errors.Is(err, ErrTaskCancelled):
+					return nodeAddresses, err
+				default:
+					return nodeAddresses, fmt.Errorf("failed to check task status: %w", err)
+				}
+			}
+
+			addresses = append(addresses, v1.NodeAddress{
+				Type:    v1.NodeInternalIP,
+				Address: *learnedIP.Value,
+			})
+		}
 	}
 
-	addresses = append(addresses, v1.NodeAddress{
+	if len(nodeAddresses) == 0 {
+		return nodeAddresses, fmt.Errorf("unable to determine network interfaces from VM with UUID %s", *vm.ExtId)
+	}
+
+	nodeAddresses = append(nodeAddresses, v1.NodeAddress{
 		Type:    v1.NodeHostName,
-		Address: *vm.Spec.Name,
+		Address: *vm.Name,
 	})
-	return addresses, nil
+	return nodeAddresses, nil
 }
 
 func (n *nutanixManager) stripNutanixIDFromProviderID(providerID string) string {
 	return strings.TrimPrefix(providerID, fmt.Sprintf("%s://", constants.ProviderName))
 }
 
-func (n *nutanixManager) getTopologyInfo(ctx context.Context, nutanixClient interfaces.Prism, vm *prismclientv3.VMIntentResponse) (config.TopologyInfo, error) {
+func (n *nutanixManager) getTopologyInfo(ctx context.Context, vm *vmmconfig.Vm) (*config.TopologyInfo, error) {
 	topologyDiscovery := n.config.TopologyDiscovery
 
 	switch topologyDiscovery.Type {
 	case config.PrismTopologyDiscoveryType:
-		return n.getTopologyInfoUsingPrism(ctx, nutanixClient, vm)
+		return n.getTopologyInfoUsingPrism(ctx, vm)
 	case config.CategoriesTopologyDiscoveryType:
-		return n.getTopologyInfoUsingCategories(ctx, nutanixClient, vm)
+		return n.getTopologyInfoUsingCategories(ctx, vm)
 	}
-	return config.TopologyInfo{}, fmt.Errorf("unsupported topology discovery type: %s", topologyDiscovery.Type)
+	return nil, fmt.Errorf("unsupported topology discovery type: %s", topologyDiscovery.Type)
 }
 
-func (n *nutanixManager) getTopologyInfoUsingPrism(ctx context.Context, nClient interfaces.Prism, vm *prismclientv3.VMIntentResponse) (config.TopologyInfo, error) {
-	ti := config.TopologyInfo{}
-	if nClient == nil {
-		return ti, fmt.Errorf("nutanix client cannot be nil when searching for Prism topology info")
-	}
+func (n *nutanixManager) getTopologyInfoUsingPrism(ctx context.Context, vm *vmmconfig.Vm) (*config.TopologyInfo, error) {
 	if vm == nil {
-		return ti, fmt.Errorf("vm cannot be nil when searching for Prism topology info")
+		return nil, fmt.Errorf("vm cannot be nil when searching for Prism topology info")
 	}
 
-	if vm.Status.ClusterReference == nil || *vm.Status.ClusterReference.Name == "" {
-		return ti, fmt.Errorf("cannot determine Prism zone information for vm %s", *vm.Spec.Name)
+	if vm.Cluster == nil || *vm.Cluster.ExtId == "" {
+		return nil, fmt.Errorf("cannot determine Prism zone information for vm %s", *vm.Name)
 	}
 
-	pc, err := n.getPrismCentralCluster(ctx, nClient)
+	nClient, err := n.nutanixClient.Get()
 	if err != nil {
-		return ti, err
+		return nil, err
 	}
-	ti.Region = *pc.Spec.Name
-	ti.Zone = *vm.Status.ClusterReference.Name
+
+	getClusterResp, err := nClient.ClustersApiInstance.GetClusterById(vm.Cluster.ExtId, nil)
+	if err != nil {
+		return nil, fmt.Errorf("error occurred while fetching cluster for VM %s: %v", *vm.Name, err)
+	}
+
+	cluster, ok := getClusterResp.GetData().(*clustermgmtconfig.Cluster)
+	if !ok {
+		return nil, fmt.Errorf("failed to cast cluster entity to cluster type")
+	}
+
+	pc, err := n.getPrismCentralCluster(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	ti := &config.TopologyInfo{
+		Region: pc.Spec.Name,
+		Zone:   *cluster.Name,
+	}
+
 	return ti, nil
 }
 
-func (n *nutanixManager) getTopologyInfoUsingCategories(ctx context.Context, nutanixClient interfaces.Prism, vm *prismclientv3.VMIntentResponse) (config.TopologyInfo, error) {
-	tc := &config.TopologyInfo{}
+func (n *nutanixManager) getTopologyInfoUsingCategories(ctx context.Context, vm *vmmconfig.Vm) (*config.TopologyInfo, error) {
 	if vm == nil {
-		return *tc, fmt.Errorf("vm cannot be nil while getting topology info")
+		return nil, fmt.Errorf("vm cannot be nil while getting topology info")
 	}
-	klog.V(1).Infof("searching for topology info on VM entity: %s", *vm.Spec.Name)
-	err := n.getTopologyInfoFromVM(vm, tc)
+
+	klog.V(1).Infof("searching for topology info on VM entity: %s", *vm.Name)
+	tc, err := n.getTopologyInfoFromVM(vm)
 	if err != nil {
-		return *tc, err
+		return nil, err
 	}
+
 	if !n.hasEmptyTopologyInfo(*tc) {
 		klog.V(1).Infof("topology info was found on VM entity: %+v", *tc)
-		return *tc, nil
-	}
-	klog.V(1).Infof("searching for topology info on host entity for VM: %s", *vm.Spec.Name)
-	nClient, err := n.nutanixClient.Get()
-	if err != nil {
-		return *tc, err
+		return tc, nil
 	}
 
-	klog.V(1).Infof("searching for topology info on cluster entity for VM: %s", *vm.Spec.Name)
-	err = n.getTopologyInfoFromCluster(ctx, nClient, vm, tc)
+	klog.V(1).Infof("searching for topology info on host entity for VM: %s", *vm.Name)
+	klog.V(1).Infof("searching for topology info on cluster entity for VM: %s", *vm.Name)
+
+	tc, err = n.getTopologyInfoFromCluster(ctx, vm)
 	if err != nil {
-		return *tc, err
+		return nil, err
 	}
+
 	klog.V(1).Infof("topology info after searching cluster: %+v", *tc)
-	return *tc, nil
+	return tc, nil
 }
 
-func (n *nutanixManager) getZoneInfoFromCategories(categories map[string]string, ti *config.TopologyInfo) error {
+func (n *nutanixManager) getZoneInfoFromCategories(categories []string) (*config.TopologyInfo, error) {
 	tCategories, err := n.getTopologyCategories()
 	if err != nil {
-		return err
+		return nil, err
 	}
+
+	ti := &config.TopologyInfo{}
 	if r, ok := categories[tCategories.RegionCategory]; ok && ti.Region == "" {
 		ti.Region = r
 	}
+
 	if z, ok := categories[tCategories.ZoneCategory]; ok && ti.Zone == "" {
 		ti.Zone = z
 	}
-	return nil
+
+	return ti, nil
 }
 
-func (n *nutanixManager) getTopologyInfoFromCluster(ctx context.Context, nClient interfaces.Prism, vm *prismclientv3.VMIntentResponse, ti *config.TopologyInfo) error {
-	if nClient == nil {
-		return fmt.Errorf("nutanix client cannot be nil when searching for topology info")
-	}
-	if vm == nil {
-		return fmt.Errorf("vm cannot be nil when searching for topology info")
-	}
-	if ti == nil {
-		return fmt.Errorf("topology categories cannot be nil when searching for topology info")
-	}
-	clusterUUID := *vm.Status.ClusterReference.UUID
-	cluster, err := nClient.GetCluster(ctx, clusterUUID)
+func (n *nutanixManager) getTopologyInfoFromCluster(vm *vmmconfig.Vm) (*config.TopologyInfo, error) {
+	nClient, err := n.nutanixClient.Get()
 	if err != nil {
-		return fmt.Errorf("error occurred while searching for topology info on cluster: %v", err)
+		return nil, err
 	}
-	if err = n.getZoneInfoFromCategories(cluster.Metadata.Categories, ti); err != nil {
-		return err
+
+	if nClient == nil {
+		return nil, fmt.Errorf("nutanix client cannot be nil when searching for topology info")
 	}
-	return nil
+
+	if vm == nil {
+		return nil, fmt.Errorf("vm cannot be nil when searching for topology info")
+	}
+
+	getClusterResp, err := nClient.ClustersApiInstance.GetClusterById(vm.Cluster.ExtId, nil)
+	if err != nil {
+		return nil, fmt.Errorf("error occurred while searching for topology info on cluster: %v", err)
+	}
+
+	cluster, ok := getClusterResp.GetData().(*clustermgmtconfig.Cluster)
+	if !ok {
+		return nil, fmt.Errorf("failed to cast cluster entity to cluster type")
+	}
+
+	return n.getZoneInfoFromCategories(cluster.Categories)
 }
 
-func (n *nutanixManager) getTopologyInfoFromVM(vm *prismclientv3.VMIntentResponse, ti *config.TopologyInfo) error {
+func (n *nutanixManager) getTopologyInfoFromVM(vm *vmmconfig.Vm) (*config.TopologyInfo, error) {
 	if vm == nil {
-		return fmt.Errorf("vm cannot be nil when searching for topology info")
+		return nil, fmt.Errorf("vm cannot be nil when searching for topology info")
 	}
-	if ti == nil {
-		return fmt.Errorf("topology categories cannot be nil when searching for topology info")
+
+	tc, err := n.getZoneInfoFromCategories(vm.Categories)
+	if err != nil {
+		return nil, err
 	}
-	if err := n.getZoneInfoFromCategories(vm.Metadata.Categories, ti); err != nil {
-		return err
-	}
-	return nil
+
+	return tc, nil
 }
 
 func (n *nutanixManager) hasEmptyTopologyInfo(ti config.TopologyInfo) bool {
@@ -456,43 +589,51 @@ func (n *nutanixManager) hasEmptyTopologyInfo(ti config.TopologyInfo) bool {
 	return false
 }
 
-func (n *nutanixManager) getPrismCentralCluster(ctx context.Context, nClient interfaces.Prism) (*prismclientv3.ClusterIntentResponse, error) {
-	const filter = ""
-	if nClient == nil {
-		return nil, fmt.Errorf("nutanix client cannot be nil when getting prism central cluster")
-	}
-	responsePEs, err := nClient.ListAllCluster(ctx, filter)
+func (n *nutanixManager) getPrismCentralCluster() (*clustermgmtconfig.Cluster, error) {
+	nClient, err := n.nutanixClient.Get()
 	if err != nil {
 		return nil, err
 	}
 
-	foundPCs := make([]*prismclientv3.ClusterIntentResponse, 0)
-	for _, s := range responsePEs.Entities {
-		if n.hasPEClusterServiceEnabled(s, constants.PrismCentralService) {
-			foundPCs = append(foundPCs, s)
+	listClustersResp, err := nClient.ClustersApiInstance.ListClusters(nil, nil, nil, nil, nil, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	clusters, ok := listClustersResp.GetData().([]clustermgmtconfig.Cluster)
+	if !ok {
+		return nil, fmt.Errorf("failed to cast cluster entity to cluster type")
+	}
+
+	foundPCs := make([]*clustermgmtconfig.Cluster, 0)
+	for _, cluster := range clusters {
+		if n.hasPEClusterServiceEnabled(&cluster, constants.PrismCentralService) {
+			foundPCs = append(foundPCs, &cluster)
 		}
 	}
 	amountOfFoundPCs := len(foundPCs)
 	if amountOfFoundPCs == 1 {
 		return foundPCs[0], nil
 	}
+
 	if len(foundPCs) == 0 {
 		return nil, fmt.Errorf("failed to retrieve Prism Central cluster")
 	}
-	return nil, fmt.Errorf("more than one Prism Central cluster ")
+
+	return nil, fmt.Errorf("more than one Prism Central cluster found")
 }
 
-func (n *nutanixManager) hasPEClusterServiceEnabled(peCluster *prismclientv3.ClusterIntentResponse, serviceName string) bool {
-	if peCluster.Status == nil ||
-		peCluster.Status.Resources == nil ||
-		peCluster.Status.Resources.Config == nil {
+func (n *nutanixManager) hasPEClusterServiceEnabled(cluster *clustermgmtconfig.Cluster, serviceName string) bool {
+	if cluster == nil {
 		return false
 	}
-	serviceList := peCluster.Status.Resources.Config.ServiceList
+
+	serviceList := cluster.Config.ClusterSoftwareMap
 	for _, s := range serviceList {
-		if s != nil && strings.ToUpper(*s) == serviceName {
+		if s.SoftwareType != nil && strings.ToUpper(s.SoftwareType.GetName()) == serviceName {
 			return true
 		}
 	}
+
 	return false
 }
