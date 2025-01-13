@@ -132,9 +132,12 @@ func (n *nutanixManager) getInstanceMetadata(ctx context.Context, node *v1.Node)
 	}
 
 	klog.V(1).Infof("fetching nodeAddresses for node %s", nodeName)
-	nodeAddresses, err := n.getNodeAddresses(ctx, vm)
-	if err != nil {
-		return nil, err
+	nodeAddresses := node.Status.Addresses
+	if !n.isNodeAddressesSet(node) {
+		nodeAddresses, err = n.getNodeAddresses(ctx, vm)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	topologyInfo, err := n.getTopologyInfo(ctx, nClient, vm)
@@ -295,6 +298,29 @@ func (n *nutanixManager) generateProviderID(ctx context.Context, vmUUID string) 
 	}
 
 	return fmt.Sprintf("%s://%s", constants.ProviderName, strings.ToLower(vmUUID)), nil
+}
+func (n *nutanixManager) isNodeAddressesSet(node *v1.Node) bool {
+	if node == nil {
+		return false
+	}
+
+	nodeAddresses := node.Status.Addresses
+	if len(nodeAddresses) < 2 { // We set at least two addresses on a node: one internal IP and one hostname
+		return false
+	}
+
+	var hasHostname, hasInternalIP bool
+	for _, address := range nodeAddresses {
+		if address.Type == v1.NodeHostName {
+			hasHostname = true
+		}
+
+		if address.Type == v1.NodeInternalIP {
+			hasInternalIP = true
+		}
+	}
+
+	return hasHostname && hasInternalIP
 }
 
 func (n *nutanixManager) getNodeAddresses(_ context.Context, vm *prismclientv3.VMIntentResponse) ([]v1.NodeAddress, error) {
