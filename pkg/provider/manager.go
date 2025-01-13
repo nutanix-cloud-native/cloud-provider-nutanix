@@ -299,18 +299,14 @@ func (n *nutanixManager) generateProviderID(ctx context.Context, vmUUID string) 
 
 	return fmt.Sprintf("%s://%s", constants.ProviderName, strings.ToLower(vmUUID)), nil
 }
+
 func (n *nutanixManager) isNodeAddressesSet(node *v1.Node) bool {
 	if node == nil {
 		return false
 	}
 
-	nodeAddresses := node.Status.Addresses
-	if len(nodeAddresses) < 2 { // We set at least two addresses on a node: one internal IP and one hostname
-		return false
-	}
-
 	var hasHostname, hasInternalIP bool
-	for _, address := range nodeAddresses {
+	for _, address := range node.Status.Addresses {
 		if address.Type == v1.NodeHostName {
 			hasHostname = true
 		}
@@ -320,6 +316,8 @@ func (n *nutanixManager) isNodeAddressesSet(node *v1.Node) bool {
 		}
 	}
 
+	// We always set at least two address types: one internal IP and one hostname.
+	// If either type is not found, then we have not set the node addresses.
 	return hasHostname && hasInternalIP
 }
 
