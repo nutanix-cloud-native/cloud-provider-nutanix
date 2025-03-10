@@ -117,6 +117,22 @@ var _ = Describe("Test Manager", func() {
 			Expect(err).Should(HaveOccurred())
 		})
 
+		It("should fail if nil vm status is passed", func() {
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameNoAddresses)
+			Expect(vm).ToNot(BeNil())
+			vm.Status = nil
+			_, err := m.getNodeAddresses(ctx, vm)
+			Expect(err).Should(HaveOccurred())
+		})
+
+		It("should fail if nil resources is passed", func() {
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameNoAddresses)
+			Expect(vm).ToNot(BeNil())
+			vm.Status.Resources = nil
+			_, err := m.getNodeAddresses(ctx, vm)
+			Expect(err).Should(HaveOccurred())
+		})
+
 		It("should fail if no node addresses are found", func() {
 			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameNoAddresses)
 			Expect(vm).ToNot(BeNil())

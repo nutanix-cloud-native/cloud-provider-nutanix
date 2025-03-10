@@ -104,7 +104,7 @@ func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockE
 	}
 
 	noAddressesVM := getDefaultVMSpec(MockVMNameNoAddresses, cluster)
-	noAddressesVM.Status.Resources.NicList = []*prismClientV3.VMNicOutputStatus{}
+	noAddressesVM.Status.Resources.NicList = nil
 	noAddressesNode, err := createNodeForVM(ctx, kClient, noAddressesVM)
 	if err != nil {
 		return nil, err
