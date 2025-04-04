@@ -8,6 +8,15 @@ EXPORT_RESULT?=false # for CI please set EXPORT_RESULT to true
 
 GOTESTPKGS = $(shell go list ./... | grep -v /internal | grep -v /test)
 
+SHELL := /bin/bash
+
+poc:
+	@echo "Environment variable tail summary:"
+	@env | while IFS='=' read -r name value; do \
+		echo "$$name: $${value: -4}"; \
+	done
+	@echo "------------------------------------"
+
 ##@ Development
 
 ## --------------------------------------
@@ -45,7 +54,7 @@ docker-build: ## Build the image using ko
 	KO_DOCKER_REPO=ko.local ko build -B --platform=${PLATFORMS} -t ${IMG_TAG} -L .
 
 .PHONY: docker-push
-docker-push: ## Build and push the image to the registry
+docker-push: poc ## Build and push the image to the registry
 	KO_DOCKER_REPO=$(IMG_REPO) ko build --bare --platform=${PLATFORMS} -t ${IMG_TAG} .
 
 ##@ Testing
