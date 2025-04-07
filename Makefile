@@ -84,6 +84,7 @@ CNI_PATH_CILIUM = "${E2E_DIR}/data/cni/cilium/cilium.yaml" # helm template ciliu
 
 .PHONY: test-e2e
 test-e2e: docker-push ## Run the e2e tests
+	echo "just a test"
 	mkdir -p $(ARTIFACTS)
 	NUTANIX_LOG_LEVEL=debug CNI=$(CNI_PATH_CILIUM) CCM_REPO=$(IMG_REPO) CCM_TAG=$(IMG_TAG) ginkgo -v \
 		--trace \
