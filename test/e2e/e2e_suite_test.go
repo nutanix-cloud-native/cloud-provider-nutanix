@@ -24,7 +24,6 @@ import (
 )
 
 func TestE2E(t *testing.T) {
-	// test
 	// If running in prow, make sure to use the artifacts folder that will be reported in test grid (ignoring the value provided by flag).
 	if prowArtifactFolder, exists := os.LookupEnv("ARTIFACTS"); exists {
 		artifactFolder = prowArtifactFolder
