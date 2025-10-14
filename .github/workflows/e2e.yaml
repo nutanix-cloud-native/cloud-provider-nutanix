@@ -20,7 +20,6 @@ jobs:
         uses: jetify-com/devbox-install-action@v0.14.0
         with:
           enable-cache: "false"
-          skip-nix-installation: "true"
 
       - uses: actions/cache@v4
         with:
