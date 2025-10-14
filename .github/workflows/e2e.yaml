@@ -75,3 +75,4 @@ jobs:
           NUTANIX_SUBNET_NAME: ${{ vars.NUTANIX_SUBNET_NAME }}
           LOCAL_IMAGE_REGISTRY: ${{ secrets.LOCAL_IMAGE_REGISTRY }}
           CONTROL_PLANE_ENDPOINT_IP: ${{ steps.get-control-plane-endpoint-ip.outputs.control_plane_endpoint_ip }}
+          NUTANIX_SSH_AUTHORIZED_KEY: fake-key
