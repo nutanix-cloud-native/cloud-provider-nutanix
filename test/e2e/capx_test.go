@@ -8,6 +8,7 @@ import (
 )
 
 var _ = Describe("CCM on a CAPX Cluster", Label("capx"), func() {
+	fmt.Println("TEST")
 	e2e.QuickStartSpec(ctx, func() e2e.QuickStartSpecInput {
 		return e2e.QuickStartSpecInput{
 			E2EConfig:             e2eConfig,
