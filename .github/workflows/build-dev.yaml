@@ -6,12 +6,11 @@ on:
       - 'release-*'
   pull_request:
     types: [opened, synchronize, reopened, labeled]
-    paths:
-      - '.github/**'
   pull_request_target:
     types: [opened, synchronize, reopened, labeled]
-    paths-ignore:
-      - '.github/**'
+    branches:
+      - main
+      - 'release-*'
 jobs:
   check_approvals:
     runs-on: ubuntu-latest
