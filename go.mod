@@ -129,4 +129,4 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
-replace github.com/nutanix-cloud-native/prism-go-client => github.com/nutanix-cloud-native/prism-go-client v0.5.2-0.20251105160217-e429212caae1
+replace github.com/nutanix-cloud-native/prism-go-client => github.com/nutanix-cloud-native/prism-go-client v0.5.2-0.20251106041916-16dbf114b71e
