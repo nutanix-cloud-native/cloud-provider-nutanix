@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+//nolint:typecheck // Test file uses ginkgo/gomega which typecheck doesn't understand well
 package provider
 
 import (
@@ -26,7 +27,7 @@ import (
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/testing/mock"
 )
 
-var _ = Describe("Test Loadbalancer", func() {
+var _ = Describe("Test Loadbalancer", func() { // nolint:typecheck
 	var (
 		ctx       context.Context
 		ntnxCloud NtnxCloud

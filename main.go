@@ -30,7 +30,7 @@ import (
 	cliflag "k8s.io/component-base/cli/flag"
 	_ "k8s.io/component-base/metrics/prometheus/clientgo" // for client metric registration
 	_ "k8s.io/component-base/metrics/prometheus/version"  // for version metric registration
-	"k8s.io/klog/v2"
+	klog "k8s.io/klog/v2"
 
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
 	_ "github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider"

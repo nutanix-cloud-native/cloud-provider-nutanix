@@ -39,7 +39,7 @@ func (i *instancesV2) InstanceExists(ctx context.Context, node *v1.Node) (bool, 
 	if err != nil {
 		return ok, err
 	}
-	klog.V(1).InfoS("InstanceExists", "node", node.Name, "exists", ok)
+	klog.V(1).InfoS("InstanceExists", "node", node.Name, "exists", ok) //nolint:typecheck
 	return ok, err
 }
 
@@ -48,7 +48,7 @@ func (i *instancesV2) InstanceShutdown(ctx context.Context, node *v1.Node) (bool
 	if err != nil {
 		return ok, err
 	}
-	klog.V(1).InfoS("InstanceShutdown", "node", node.Name, "shutdown", ok)
+	klog.V(1).InfoS("InstanceShutdown", "node", node.Name, "shutdown", ok) //nolint:typecheck
 	return ok, err
 }
 
@@ -57,6 +57,6 @@ func (i *instancesV2) InstanceMetadata(ctx context.Context, node *v1.Node) (*clo
 	if err != nil {
 		return md, err
 	}
-	klog.V(1).InfoS("InstanceMetadata", "node", node.Name, "metadata", md)
+	klog.V(1).InfoS("InstanceMetadata", "node", node.Name, "metadata", md) //nolint:typecheck
 	return md, err
 }
