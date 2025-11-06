@@ -20,41 +20,44 @@ import (
 	"context"
 	"fmt"
 
+	convergedV4 "github.com/nutanix-cloud-native/prism-go-client/converged/v4"
 	"github.com/nutanix-cloud-native/prism-go-client/environment"
 	credentialtypes "github.com/nutanix-cloud-native/prism-go-client/environment/credentials"
 	kubernetesenv "github.com/nutanix-cloud-native/prism-go-client/environment/providers/kubernetes"
 	envtypes "github.com/nutanix-cloud-native/prism-go-client/environment/types"
-	prismclientv3 "github.com/nutanix-cloud-native/prism-go-client/v3"
 	"k8s.io/client-go/informers"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/klog/v2"
+	klog "k8s.io/klog/v2"
 
-	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants" //nolint:typecheck
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/interfaces"
+	clusterModels "github.com/nutanix/ntnx-api-golang-clients/clustermgmt-go-client/v4/models/clustermgmt/v4/config"
+	prismModels "github.com/nutanix/ntnx-api-golang-clients/prism-go-client/v4/models/prism/v4/config"
+	vmmModels "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/vmm/v4/ahv/config"
 )
 
 const errEnvironmentNotReady = "environment not initialized or ready yet"
 
-type nutanixClient struct {
+type nutanixClientEnvironment struct {
 	env               envtypes.Environment
 	config            config.Config
 	secretInformer    coreinformers.SecretInformer
 	sharedInformers   informers.SharedInformerFactory
 	configMapInformer coreinformers.ConfigMapInformer
-	clientCache       *prismclientv3.ClientCache
+	clientCache       *convergedV4.ClientCache
 }
 
 // Key returns the constant client name
 // This implements the CachedClientParams interface of prism-go-client
-func (n *nutanixClient) Key() string {
+func (n *nutanixClientEnvironment) Key() string {
 	return constants.ClientName
 }
 
 // ManagementEndpoint returns the management endpoint of the Nutanix cluster
 // This implements the CachedClientParams interface of prism-go-client
-func (n *nutanixClient) ManagementEndpoint() envtypes.ManagementEndpoint {
+func (n *nutanixClientEnvironment) ManagementEndpoint() envtypes.ManagementEndpoint {
 	if n.env == nil {
 		klog.Error("environment not initialized")
 		return envtypes.ManagementEndpoint{}
@@ -69,7 +72,7 @@ func (n *nutanixClient) ManagementEndpoint() envtypes.ManagementEndpoint {
 	return *mgmtEndpoint
 }
 
-func (n *nutanixClient) Get() (interfaces.Prism, error) {
+func (n *nutanixClientEnvironment) Get() (interfaces.Prism, error) {
 	if err := n.setupEnvironment(); err != nil {
 		return nil, fmt.Errorf("%s: %w", errEnvironmentNotReady, err)
 	}
@@ -78,15 +81,18 @@ func (n *nutanixClient) Get() (interfaces.Prism, error) {
 		return nil, fmt.Errorf("%s: client cache not initialized", errEnvironmentNotReady)
 	}
 
-	client, err := n.clientCache.GetOrCreate(n)
+	convergedClient, err := n.clientCache.GetOrCreate(n)
 	if err != nil {
 		return nil, err
 	}
 
-	return client.V3, nil
+	client := &nutanixClient{
+		convergedClient: convergedClient,
+	}
+	return client, nil
 }
 
-func (n *nutanixClient) setupEnvironment() error {
+func (n *nutanixClientEnvironment) setupEnvironment() error {
 	if n.env != nil {
 		return nil
 	}
@@ -115,7 +121,7 @@ func (n *nutanixClient) setupEnvironment() error {
 	return nil
 }
 
-func (n *nutanixClient) SetInformers(sharedInformers informers.SharedInformerFactory) {
+func (n *nutanixClientEnvironment) SetInformers(sharedInformers informers.SharedInformerFactory) {
 	n.sharedInformers = sharedInformers
 	n.secretInformer = n.sharedInformers.Core().V1().Secrets()
 	n.configMapInformer = n.sharedInformers.Core().V1().ConfigMaps()
@@ -123,7 +129,7 @@ func (n *nutanixClient) SetInformers(sharedInformers informers.SharedInformerFac
 	n.syncCache(n.configMapInformer.Informer())
 }
 
-func (n *nutanixClient) syncCache(informer cache.SharedInformer) {
+func (n *nutanixClientEnvironment) syncCache(informer cache.SharedInformer) {
 	hasSynced := informer.HasSynced
 	if !hasSynced() {
 		stopCh := context.Background().Done()
@@ -132,4 +138,28 @@ func (n *nutanixClient) syncCache(informer cache.SharedInformer) {
 			klog.Fatal("failed to wait for caches to sync")
 		}
 	}
+}
+
+type nutanixClient struct {
+	convergedClient *convergedV4.Client
+}
+
+func (client *nutanixClient) GetVM(ctx context.Context, vmUUID string) (*vmmModels.Vm, error) {
+	return client.convergedClient.VMs.Get(ctx, vmUUID)
+}
+
+func (client *nutanixClient) GetCluster(ctx context.Context, clusterUUID string) (*clusterModels.Cluster, error) {
+	return client.convergedClient.Clusters.Get(ctx, clusterUUID)
+}
+
+func (client *nutanixClient) ListAllCluster(ctx context.Context) ([]clusterModels.Cluster, error) {
+	return client.convergedClient.Clusters.List(ctx)
+}
+
+func (client *nutanixClient) GetCategory(ctx context.Context, categoryUUID string) (*prismModels.Category, error) {
+	return client.convergedClient.Categories.Get(ctx, categoryUUID)
+}
+
+func (client *nutanixClient) GetClusterHost(ctx context.Context, clusterUuid string, hostUUID string) (*clusterModels.Host, error) {
+	return client.convergedClient.Clusters.GetClusterHost(ctx, clusterUuid, hostUUID)
 }

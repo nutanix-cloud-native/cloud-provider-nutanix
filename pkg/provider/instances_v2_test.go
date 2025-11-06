@@ -14,24 +14,26 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+//nolint:typecheck // Test file uses ginkgo/gomega which typecheck doesn't understand well
 package provider
 
 import (
 	"context"
 
+	clusterModels "github.com/nutanix/ntnx-api-golang-clients/clustermgmt-go-client/v4/models/clustermgmt/v4/config"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"go4.org/netipx"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/rand"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/testing/mock"
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
-	prismClientV3 "github.com/nutanix-cloud-native/prism-go-client/v3"
 )
 
-var _ = Describe("Test InstancesV2", func() {
+var _ = Describe("Test InstancesV2", func() { // nolint:typecheck
 	var (
 		ctx                    context.Context
 		kClient                *fake.Clientset
@@ -40,16 +42,16 @@ var _ = Describe("Test InstancesV2", func() {
 		err                    error
 		prismTopologyConfig    config.Config
 		categoryTopologyConfig config.Config
-		additionalPC           *prismClientV3.ClusterIntentResponse
+		additionalPC           *clusterModels.Cluster
 	)
 
-	BeforeEach(func() {
+	BeforeEach(func() { //nolint:typecheck
 		ctx = context.TODO()
 		kClient = fake.NewSimpleClientset()
 		mockEnvironment, err = mock.CreateMockEnvironment(ctx, kClient)
-		Expect(err).ShouldNot(HaveOccurred())
-		Expect(mockEnvironment).ToNot(BeNil())
-		additionalPC = mock.CreatePrismCentralCluster(rand.String(10))
+		Expect(err).ShouldNot(HaveOccurred())  //nolint:typecheck
+		Expect(mockEnvironment).ToNot(BeNil()) //nolint:typecheck
+		additionalPC = mock.CreatePrismCentralCluster(rand.String(10), string(uuid.NewUUID()))
 		prismTopologyConfig = config.Config{
 			TopologyDiscovery: config.TopologyDiscovery{
 				Type: config.PrismTopologyDiscoveryType,
@@ -76,10 +78,10 @@ var _ = Describe("Test InstancesV2", func() {
 		}
 	})
 
-	Context("Test InstanceExists", func() {
-		It("should fail no VM exists for node", func() {
+	Context("Test InstanceExists", func() { //nolint:typecheck
+		It("should fail no VM exists for node", func() { //nolint:typecheck
 			node := mockEnvironment.GetNode(mock.MockNodeNameVMNotExisting)
-			Expect(node).ToNot(BeNil())
+			Expect(node).ToNot(BeNil()) //nolint:typecheck
 			e, err := i.InstanceExists(ctx, node)
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(e).To(BeFalse())
@@ -192,11 +194,12 @@ var _ = Describe("Test InstancesV2", func() {
 		It("[TopologyDiscovery: Prism] should have PC name set as region and PE as zone", func() {
 			node := mockEnvironment.GetNode(mock.MockVMNamePoweredOn)
 			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
+			cluster := mockEnvironment.GetCluster(ctx, mock.MockCluster)
 			// Change config to Prism topology discovery
 			i.nutanixManager.config = prismTopologyConfig
 			metadata, err := i.InstanceMetadata(ctx, node)
 			Expect(err).ShouldNot(HaveOccurred())
-			mock.ValidateInstanceMetadata(metadata, vm, mock.MockPrismCentral, *vm.Status.ClusterReference.Name)
+			mock.ValidateInstanceMetadata(metadata, vm, mock.MockPrismCentral, *cluster.Name)
 		})
 
 		It("[TopologyDiscovery: Prism] should fail if multiple PCs are found", func() {
@@ -210,7 +213,7 @@ var _ = Describe("Test InstancesV2", func() {
 
 		It("[TopologyDiscovery: Prism] should fail if no PC is found", func() {
 			pc := mockEnvironment.GetCluster(ctx, mock.MockPrismCentral)
-			mockEnvironment.DeleteCluster(*pc.Metadata.UUID)
+			mockEnvironment.DeleteCluster(*pc.ExtId)
 			node := mockEnvironment.GetNode(mock.MockVMNamePoweredOn)
 			// Change config to Prism topology discovery
 			i.nutanixManager.config = prismTopologyConfig
@@ -221,21 +224,28 @@ var _ = Describe("Test InstancesV2", func() {
 		It("should have all custom labels set if custom labels are enabled and VM is poweredOn", func() {
 			node := mockEnvironment.GetNode(mock.MockVMNamePoweredOn)
 			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
-			_, err := i.InstanceMetadata(ctx, node)
+			cluster := mockEnvironment.GetCluster(ctx, mock.MockCluster)
+			hostUUID := *vm.Host.ExtId
+			nClient, _ := i.nutanixManager.nutanixClient.Get()
+			host, err := nClient.GetClusterHost(ctx, *cluster.ExtId, hostUUID)
+			Expect(err).ToNot(HaveOccurred())
+			_, err = i.InstanceMetadata(ctx, node)
 			Expect(err).ShouldNot(HaveOccurred())
 			updatedNode, err := kClient.CoreV1().Nodes().Get(ctx, node.ObjectMeta.Name, metav1.GetOptions{})
 			Expect(err).ToNot(HaveOccurred())
-			mock.CheckAdditionalLabels(updatedNode, vm)
+			mock.CheckAdditionalLabels(updatedNode, vm, cluster, host)
 		})
 
 		It("should not have Prism Host labels set if custom labels are enabled and VM is poweredOff", func() {
 			node := mockEnvironment.GetNode(mock.MockVMNamePoweredOff)
 			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOff)
+			cluster := mockEnvironment.GetCluster(ctx, mock.MockCluster)
+			// PoweredOff VMs don't have host reference
 			_, err := i.InstanceMetadata(ctx, node)
 			Expect(err).ShouldNot(HaveOccurred())
 			updatedNode, err := kClient.CoreV1().Nodes().Get(ctx, node.ObjectMeta.Name, metav1.GetOptions{})
 			Expect(err).ToNot(HaveOccurred())
-			mock.CheckAdditionalLabels(updatedNode, vm)
+			mock.CheckAdditionalLabels(updatedNode, vm, cluster, nil)
 		})
 
 		It("should not have any custom labels set if disabled", func() {

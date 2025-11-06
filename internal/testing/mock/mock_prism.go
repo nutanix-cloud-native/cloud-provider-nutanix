@@ -20,32 +20,46 @@ import (
 	"context"
 	"fmt"
 
-	prismClientV3 "github.com/nutanix-cloud-native/prism-go-client/v3"
+	clusterModels "github.com/nutanix/ntnx-api-golang-clients/clustermgmt-go-client/v4/models/clustermgmt/v4/config"
+	prismModels "github.com/nutanix/ntnx-api-golang-clients/prism-go-client/v4/models/prism/v4/config"
+	vmmModels "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/vmm/v4/ahv/config"
 )
 
 type MockPrism struct {
 	mockEnvironment MockEnvironment
 }
 
-func (mp *MockPrism) GetVM(ctx context.Context, vmUUID string) (*prismClientV3.VMIntentResponse, error) {
+func (mp *MockPrism) GetVM(ctx context.Context, vmUUID string) (*vmmModels.Vm, error) {
 	if v, ok := mp.mockEnvironment.managedMockMachines[vmUUID]; ok {
 		return v, nil
 	} else {
-		return nil, fmt.Errorf(entityNotFoundError)
+		return nil, fmt.Errorf(vmNotFoundError)
 	}
 }
 
-func (mp *MockPrism) GetCluster(ctx context.Context, clusterUUID string) (*prismClientV3.ClusterIntentResponse, error) {
+func (mp *MockPrism) GetCluster(ctx context.Context, clusterUUID string) (*clusterModels.Cluster, error) {
 	return mp.mockEnvironment.managedMockClusters[clusterUUID], nil
 }
 
-func (mp *MockPrism) ListAllCluster(ctx context.Context, filter string) (*prismClientV3.ClusterListIntentResponse, error) {
-	entities := make([]*prismClientV3.ClusterIntentResponse, 0)
+func (mp *MockPrism) ListAllCluster(ctx context.Context) ([]clusterModels.Cluster, error) {
+	entities := make([]clusterModels.Cluster, 0)
 
 	for _, e := range mp.mockEnvironment.managedMockClusters {
-		entities = append(entities, e)
+		entities = append(entities, *e)
 	}
-	return &prismClientV3.ClusterListIntentResponse{
-		Entities: entities,
-	}, nil
+	return entities, nil
+}
+
+func (mp *MockPrism) GetCategory(ctx context.Context, categoryUUID string) (*prismModels.Category, error) {
+	if cat, ok := mp.mockEnvironment.managedMockCategories[categoryUUID]; ok {
+		return cat, nil
+	}
+	return nil, fmt.Errorf(entityNotFoundError)
+}
+
+func (mp *MockPrism) GetClusterHost(ctx context.Context, clusterUuid string, hostUUID string) (*clusterModels.Host, error) {
+	if host, ok := mp.mockEnvironment.managedMockHosts[hostUUID]; ok {
+		return host, nil
+	}
+	return nil, fmt.Errorf(entityNotFoundError)
 }

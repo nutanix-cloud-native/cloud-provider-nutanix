@@ -19,7 +19,9 @@ package interfaces
 import (
 	"context"
 
-	prismClientV3 "github.com/nutanix-cloud-native/prism-go-client/v3"
+	clusterModels "github.com/nutanix/ntnx-api-golang-clients/clustermgmt-go-client/v4/models/clustermgmt/v4/config"
+	prismModels "github.com/nutanix/ntnx-api-golang-clients/prism-go-client/v4/models/prism/v4/config"
+	vmmModels "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/vmm/v4/ahv/config"
 	"k8s.io/client-go/informers"
 )
 
@@ -29,7 +31,9 @@ type Client interface {
 }
 
 type Prism interface {
-	GetVM(ctx context.Context, vmUUID string) (*prismClientV3.VMIntentResponse, error)
-	GetCluster(ctx context.Context, clusterUUID string) (*prismClientV3.ClusterIntentResponse, error)
-	ListAllCluster(ctx context.Context, filter string) (*prismClientV3.ClusterListIntentResponse, error)
+	GetVM(ctx context.Context, vmUUID string) (*vmmModels.Vm, error)
+	GetCluster(ctx context.Context, clusterUUID string) (*clusterModels.Cluster, error)
+	ListAllCluster(ctx context.Context) ([]clusterModels.Cluster, error)
+	GetCategory(ctx context.Context, categoryUUID string) (*prismModels.Category, error)
+	GetClusterHost(ctx context.Context, clusterUuid string, hostUUID string) (*clusterModels.Host, error)
 }

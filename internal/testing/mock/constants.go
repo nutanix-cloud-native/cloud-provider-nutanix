@@ -32,11 +32,17 @@ const (
 	MockVMNameNoAddresses                = "mock-vm-no-addresses"
 	MockVMNameFilteredNodeAddresses      = "mock-vm-filtered-node-addresses"
 	MockVMNamePoweredOnClusterCategories = "mock-vm-poweredon-cluster-categories"
+	MockVMNameDpOffload                  = "mock-vm-dp-offload"
+	MockVMNameSecondaryIPs               = "mock-vm-secondary-ips"
+
+	MockSecondaryIP1 = "2.2.2.2"
+	MockSecondaryIP2 = "3.3.3.3"
 
 	MockNodeNameVMNotExisting = "mock-node-no-vm-exists"
 	MockNodeNameNoSystemUUID  = "mock-node-no-system-uuid"
 
 	entityNotFoundError = "ENTITY_NOT_FOUND"
+	vmNotFoundError     = "VM_NOT_FOUND"
 
 	mockHost              = "mock-host"
 	mockAddress           = "mock-address"
@@ -45,4 +51,20 @@ const (
 	mockPort              = 9440
 	mockInsecure          = false
 	mockClusterCategories = "mock-cluster-categories"
+
+	// Consistent UUIDs for all mock entities
+	MockClusterUUID                      = "00000000-0000-0000-0000-000000000001"
+	MockPrismCentralUUID                 = "00000000-0000-0000-0000-000000000002"
+	MockClusterCategoriesUUID            = "00000000-0000-0000-0000-000000000003"
+	MockHostUUID                         = "00000000-0000-0000-0000-000000000010"
+	MockVMPoweredOnUUID                  = "00000000-0000-0000-0000-000000000100"
+	MockVMPoweredOffUUID                 = "00000000-0000-0000-0000-000000000101"
+	MockVMCategoriesUUID                 = "00000000-0000-0000-0000-000000000102"
+	MockVMNoAddressesUUID                = "00000000-0000-0000-0000-000000000103"
+	MockVMFilteredAddressesUUID          = "00000000-0000-0000-0000-000000000104"
+	MockVMPoweredOnClusterCategoriesUUID = "00000000-0000-0000-0000-000000000105"
+	MockVMDpOffloadUUID                  = "00000000-0000-0000-0000-000000000106"
+	MockVMSecondaryIPsUUID               = "00000000-0000-0000-0000-000000000107"
+	MockCategoryRegionUUID               = "00000000-0000-0000-0000-000000000200"
+	MockCategoryZoneUUID                 = "00000000-0000-0000-0000-000000000201"
 )
