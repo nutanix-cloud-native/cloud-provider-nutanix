@@ -169,6 +169,18 @@ func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockE
 		return nil, err
 	}
 
+	dpOffloadVM := getDefaultVMWithDpOffload(MockVMNameDpOffload, MockVMDpOffloadUUID, cluster, host)
+	dpOffloadNode, err := createNodeForVM(ctx, kClient, dpOffloadVM)
+	if err != nil {
+		return nil, err
+	}
+
+	secondaryIPsVM := getDefaultVMWithSecondaryIPs(MockVMNameSecondaryIPs, MockVMSecondaryIPsUUID, cluster, host)
+	secondaryIPsNode, err := createNodeForVM(ctx, kClient, secondaryIPsVM)
+	if err != nil {
+		return nil, err
+	}
+
 	return &MockEnvironment{
 		managedMockMachines: map[string]*vmmModels.Vm{
 			*poweredOnVM.ExtId:                  poweredOnVM,
@@ -177,6 +189,8 @@ func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockE
 			*noAddressesVM.ExtId:                noAddressesVM,
 			*poweredOnVMClusterCategories.ExtId: poweredOnVMClusterCategories,
 			*filteredAddressesVM.ExtId:          filteredAddressesVM,
+			*dpOffloadVM.ExtId:                  dpOffloadVM,
+			*secondaryIPsVM.ExtId:               secondaryIPsVM,
 		},
 		managedMockClusters: map[string]*clusterModels.Cluster{
 			*cluster.ExtId:           cluster,
@@ -199,6 +213,8 @@ func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockE
 			MockNodeNameNoSystemUUID:             noSystemUUIDNode,
 			MockVMNamePoweredOnClusterCategories: poweredOnClusterCategoriesNode,
 			MockVMNameFilteredNodeAddresses:      filteredAddressesNode,
+			MockVMNameDpOffload:                  dpOffloadNode,
+			MockVMNameSecondaryIPs:               secondaryIPsNode,
 		},
 		vmNameToExtId: map[string]string{
 			MockVMNamePoweredOn:                  *poweredOnVM.ExtId,
@@ -207,6 +223,8 @@ func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockE
 			MockVMNameNoAddresses:                *noAddressesVM.ExtId,
 			MockVMNameFilteredNodeAddresses:      *filteredAddressesVM.ExtId,
 			MockVMNamePoweredOnClusterCategories: *poweredOnVMClusterCategories.ExtId,
+			MockVMNameDpOffload:                  *dpOffloadVM.ExtId,
+			MockVMNameSecondaryIPs:               *secondaryIPsVM.ExtId,
 		},
 	}, nil
 }

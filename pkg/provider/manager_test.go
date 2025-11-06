@@ -184,6 +184,73 @@ var _ = Describe("Test Manager", func() { // nolint:typecheck
 				v1.NodeAddress{Type: v1.NodeHostName, Address: *vm.Name},
 			))
 		})
+
+		It("should fetch the correct node addresses from DpOffloadNicNetworkInfo", func() { // nolint:typecheck
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameDpOffload)
+			Expect(vm).ToNot(BeNil())
+			addresses, err := m.getNodeAddresses(ctx, vm)
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(len(addresses)).To(Equal(2))
+			Expect(addresses).Should(
+				ContainElements(
+					gstruct.MatchFields(
+						gstruct.IgnoreExtras,
+						gstruct.Fields{
+							"Type":    Equal(v1.NodeInternalIP),
+							"Address": Equal(mock.MockIP),
+						},
+					),
+					gstruct.MatchFields(
+						gstruct.IgnoreExtras,
+						gstruct.Fields{
+							"Type":    Equal(v1.NodeHostName),
+							"Address": Equal(*vm.Name),
+						},
+					),
+				),
+			)
+		})
+
+		It("should fetch secondary IP addresses from SecondaryIpAddressList", func() { // nolint:typecheck
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameSecondaryIPs)
+			Expect(vm).ToNot(BeNil())
+			addresses, err := m.getNodeAddresses(ctx, vm)
+			Expect(err).ShouldNot(HaveOccurred())
+			// Should have primary IP, 2 secondary IPs, and hostname = 4 addresses
+			Expect(len(addresses)).To(Equal(4))
+			Expect(addresses).Should(
+				ContainElements(
+					gstruct.MatchFields(
+						gstruct.IgnoreExtras,
+						gstruct.Fields{
+							"Type":    Equal(v1.NodeInternalIP),
+							"Address": Equal(mock.MockIP),
+						},
+					),
+					gstruct.MatchFields(
+						gstruct.IgnoreExtras,
+						gstruct.Fields{
+							"Type":    Equal(v1.NodeInternalIP),
+							"Address": Equal(mock.MockSecondaryIP1),
+						},
+					),
+					gstruct.MatchFields(
+						gstruct.IgnoreExtras,
+						gstruct.Fields{
+							"Type":    Equal(v1.NodeInternalIP),
+							"Address": Equal(mock.MockSecondaryIP2),
+						},
+					),
+					gstruct.MatchFields(
+						gstruct.IgnoreExtras,
+						gstruct.Fields{
+							"Type":    Equal(v1.NodeHostName),
+							"Address": Equal(*vm.Name),
+						},
+					),
+				),
+			)
+		})
 	})
 
 	Context("Test generateProviderID", func() {

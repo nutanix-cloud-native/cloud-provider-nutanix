@@ -82,6 +82,99 @@ func getDefaultVM(vmName string, vmUUID string, cluster *clusterModels.Cluster, 
 	return vm
 }
 
+func getDefaultVMWithDpOffload(vmName string, vmUUID string, cluster *clusterModels.Cluster, host *clusterModels.Host) *vmmModels.Vm {
+	nic := vmmModels.NewNic()
+	nicNetInfo := vmmModels.NewDpOffloadNicNetworkInfo()
+
+	nicNetInfo.Ipv4Config = vmmModels.NewIpv4Config()
+	nicNetInfo.Ipv4Config.IpAddress = &vmmCommonModels.IPv4Address{
+		Value: ptr.To(MockIP),
+	}
+
+	nicNetInfo.Ipv4Info = vmmModels.NewIpv4Info()
+	nicNetInfo.Ipv4Info.LearnedIpAddresses = []vmmCommonModels.IPv4Address{
+		{
+			Value: ptr.To(MockIP),
+		},
+	}
+
+	err := nic.SetNicNetworkInfo(*nicNetInfo)
+	if err != nil {
+		fmt.Printf("error setting nic network info: %+v\n", err)
+		return nil
+	}
+
+	vm := &vmmModels.Vm{
+		ExtId:      ptr.To(vmUUID),
+		Categories: make([]vmmModels.CategoryReference, 0),
+		PowerState: vmmModels.POWERSTATE_ON.Ref(),
+		Name:       ptr.To(vmName),
+		Cluster: &vmmModels.ClusterReference{
+			ExtId: cluster.ExtId,
+		},
+		Nics: []vmmModels.Nic{
+			*nic,
+		},
+	}
+	if host != nil {
+		vm.Host = &vmmModels.HostReference{
+			ExtId: host.ExtId,
+		}
+	}
+	return vm
+}
+
+func getDefaultVMWithSecondaryIPs(vmName string, vmUUID string, cluster *clusterModels.Cluster, host *clusterModels.Host) *vmmModels.Vm {
+	nic := vmmModels.NewNic()
+	nicNetInfo := vmmModels.NewVirtualEthernetNicNetworkInfo()
+
+	nicNetInfo.Ipv4Config = vmmModels.NewIpv4Config()
+	nicNetInfo.Ipv4Config.IpAddress = &vmmCommonModels.IPv4Address{
+		Value: ptr.To(MockIP),
+	}
+	// Set secondary IP addresses
+	nicNetInfo.Ipv4Config.SecondaryIpAddressList = []vmmCommonModels.IPv4Address{
+		{
+			Value: ptr.To(MockSecondaryIP1),
+		},
+		{
+			Value: ptr.To(MockSecondaryIP2),
+		},
+	}
+
+	nicNetInfo.Ipv4Info = vmmModels.NewIpv4Info()
+	nicNetInfo.Ipv4Info.LearnedIpAddresses = []vmmCommonModels.IPv4Address{
+		{
+			Value: ptr.To(MockIP),
+		},
+	}
+
+	err := nic.SetNicNetworkInfo(*nicNetInfo)
+	if err != nil {
+		fmt.Printf("error setting nic network info: %+v\n", err)
+		return nil
+	}
+
+	vm := &vmmModels.Vm{
+		ExtId:      ptr.To(vmUUID),
+		Categories: make([]vmmModels.CategoryReference, 0),
+		PowerState: vmmModels.POWERSTATE_ON.Ref(),
+		Name:       ptr.To(vmName),
+		Cluster: &vmmModels.ClusterReference{
+			ExtId: cluster.ExtId,
+		},
+		Nics: []vmmModels.Nic{
+			*nic,
+		},
+	}
+	if host != nil {
+		vm.Host = &vmmModels.HostReference{
+			ExtId: host.ExtId,
+		}
+	}
+	return vm
+}
+
 func getDefaultCluster(clusterName string, clusterUUID string) *clusterModels.Cluster {
 	cluster := clusterModels.NewCluster()
 	cluster.ExtId = ptr.To(clusterUUID)
