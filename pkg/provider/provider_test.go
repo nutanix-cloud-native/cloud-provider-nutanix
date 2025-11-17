@@ -14,7 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-//nolint:typecheck // Test file uses ginkgo/gomega which typecheck doesn't understand well
 package provider
 
 import (
@@ -32,20 +31,20 @@ import (
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
 )
 
-var _ = Describe("Test Provider", func() { //nolint:typecheck
+var _ = Describe("Test Provider", func() {
 	const mockReaderValue = "mock-reader"
 
 	var (
 		kClient   *fake.Clientset
 		ntnxCloud NtnxCloud
-		nClient   nutanixClientEnvironment
+		nClient   nutanixClient
 		c         config.Config
 	)
 
 	BeforeEach(func() {
 		kClient = fake.NewSimpleClientset()
 		c = mock.GenerateMockConfig()
-		nClient = nutanixClientEnvironment{
+		nClient = nutanixClient{
 			config: c,
 		}
 		ntnxCloud = NtnxCloud{

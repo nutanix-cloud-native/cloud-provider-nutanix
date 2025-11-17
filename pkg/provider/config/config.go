@@ -21,7 +21,7 @@ import (
 	"fmt"
 
 	credentialTypes "github.com/nutanix-cloud-native/prism-go-client/environment/credentials"
-	klog "k8s.io/klog/v2"
+	"k8s.io/klog/v2"
 )
 
 // Config of Nutanix provider
