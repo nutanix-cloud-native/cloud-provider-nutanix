@@ -47,7 +47,7 @@ func init() {
 func newNtnxCloud(configReader io.Reader) (cloudprovider.Interface, error) {
 	bytes, err := io.ReadAll(configReader)
 	if err != nil {
-		klog.Infof("Error in initializing %s cloudprovid config %q\n", constants.ProviderName, err) //nolint:typecheck
+		klog.Infof("Error in initializing %s cloudprovid config %q\n", constants.ProviderName, err)
 		return nil, err
 	}
 
@@ -74,9 +74,9 @@ func newNtnxCloud(configReader io.Reader) (cloudprovider.Interface, error) {
 func (nc *NtnxCloud) Initialize(clientBuilder cloudprovider.ControllerClientBuilder,
 	stopCh <-chan struct{},
 ) {
-	klog.Info("Initializing client ...") //nolint:typecheck
+	klog.Info("Initializing client ...")
 	nc.addKubernetesClient(clientBuilder.ClientOrDie("cloud-provider-nutanix"))
-	klog.Infof("Client initialized") //nolint:typecheck
+	klog.Infof("Client initialized")
 }
 
 func (nc *NtnxCloud) addKubernetesClient(kclient clientset.Interface) {
@@ -107,12 +107,12 @@ func (nc *NtnxCloud) Clusters() (cloudprovider.Clusters, bool) {
 }
 
 func (nc *NtnxCloud) Zones() (cloudprovider.Zones, bool) {
-	klog.Info("Zones [DEPRECATED]") //nolint:typecheck
+	klog.Info("Zones [DEPRECATED]")
 	return nil, false
 }
 
 func (nc *NtnxCloud) Instances() (cloudprovider.Instances, bool) {
-	klog.Info("Instances [DEPRECATED]") //nolint:typecheck
+	klog.Info("Instances [DEPRECATED]")
 	return nil, false
 }
 

@@ -14,7 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-//nolint:typecheck // Test file uses ginkgo/gomega which typecheck doesn't understand well
 package provider
 
 import (
@@ -27,14 +26,12 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
-	vmmModels "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/vmm/v4/ahv/config"
-
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/testing/mock"
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/interfaces"
 )
 
-var _ = Describe("Test Manager", func() { // nolint:typecheck
+var _ = Describe("Test Manager", func() {
 	var (
 		ctx             context.Context
 		kClient         *fake.Clientset
@@ -44,7 +41,7 @@ var _ = Describe("Test Manager", func() { // nolint:typecheck
 		nClient         interfaces.Prism
 	)
 
-	BeforeEach(func() { // nolint:typecheck
+	BeforeEach(func() {
 		ctx = context.TODO()
 		kClient = fake.NewSimpleClientset()
 		mockEnvironment, err = mock.CreateMockEnvironment(ctx, kClient)
@@ -72,26 +69,26 @@ var _ = Describe("Test Manager", func() { // nolint:typecheck
 	})
 
 	Context("Test HasEmptyTopologyInfo", func() {
-		It("should detect emptyTopologyInfo", func() { // nolint:typecheck
+		It("should detect emptyTopologyInfo", func() {
 			c := config.TopologyInfo{}
 			Expect(m.hasEmptyTopologyInfo(c)).To(BeTrue())
 		})
 
-		It("should detect empty zone", func() { // nolint:typecheck
+		It("should detect empty zone", func() {
 			c := config.TopologyInfo{
 				Region: mock.MockRegion,
 			}
 			Expect(m.hasEmptyTopologyInfo(c)).To(BeTrue())
 		})
 
-		It("should detect empty region", func() { // nolint:typecheck
+		It("should detect empty region", func() {
 			c := config.TopologyInfo{
 				Zone: mock.MockZone,
 			}
 			Expect(m.hasEmptyTopologyInfo(c)).To(BeTrue())
 		})
 
-		It("should detect non-empty region", func() { // nolint:typecheck
+		It("should detect non-empty region", func() {
 			c := config.TopologyInfo{
 				Zone:   mock.MockZone,
 				Region: mock.MockRegion,
@@ -101,13 +98,13 @@ var _ = Describe("Test Manager", func() { // nolint:typecheck
 	})
 
 	Context("Test IsVMShutdown", func() {
-		It("should detect if VM is powered off", func() { // nolint:typecheck
+		It("should detect if VM is powered off", func() {
 			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOff)
 			Expect(vm).ToNot(BeNil())
 			Expect(m.isVMShutdown(vm)).To(BeTrue())
 		})
 
-		It("should detect if VM is powered on", func() { // nolint:typecheck
+		It("should detect if VM is powered on", func() {
 			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
 			Expect(vm).ToNot(BeNil())
 			Expect(m.isVMShutdown(vm)).To(BeFalse())
@@ -115,39 +112,35 @@ var _ = Describe("Test Manager", func() { // nolint:typecheck
 	})
 
 	Context("Test GetNodeAddresses", func() {
-		It("should fail if nil node is passed", func() { // nolint:typecheck
+		It("should fail if nil node is passed", func() {
 			_, err := m.getNodeAddresses(ctx, nil)
 			Expect(err).Should(HaveOccurred())
 		})
 
-		It("should fail if nil vm nics is passed", func() { // nolint:typecheck
+		It("should fail if nil vm status is passed", func() {
 			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameNoAddresses)
 			Expect(vm).ToNot(BeNil())
-			vm.Nics = nil
+			vm.Status = nil
 			_, err := m.getNodeAddresses(ctx, vm)
 			Expect(err).Should(HaveOccurred())
 		})
 
-		It("should fail if nil nic network info is passed", func() { // nolint:typecheck
+		It("should fail if nil resources is passed", func() {
 			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameNoAddresses)
 			Expect(vm).ToNot(BeNil())
-			vm.Nics = []vmmModels.Nic{
-				{
-					NicNetworkInfo: nil,
-				},
-			}
+			vm.Status.Resources = nil
 			_, err := m.getNodeAddresses(ctx, vm)
 			Expect(err).Should(HaveOccurred())
 		})
 
-		It("should fail if no node addresses are found", func() { // nolint:typecheck
+		It("should fail if no node addresses are found", func() {
 			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameNoAddresses)
 			Expect(vm).ToNot(BeNil())
 			_, err := m.getNodeAddresses(ctx, vm)
 			Expect(err).Should(HaveOccurred())
 		})
 
-		It("should fetch the correct node addresses", func() { // nolint:typecheck
+		It("should fetch the correct node addresses", func() {
 			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
 			Expect(vm).ToNot(BeNil())
 			addresses, err := m.getNodeAddresses(ctx, vm)
@@ -166,14 +159,14 @@ var _ = Describe("Test Manager", func() { // nolint:typecheck
 						gstruct.IgnoreExtras,
 						gstruct.Fields{
 							"Type":    Equal(v1.NodeHostName),
-							"Address": Equal(*vm.Name),
+							"Address": Equal(*vm.Spec.Name),
 						},
 					),
 				),
 			)
 		})
 
-		It("should filter node addresses if matching specified filtered addresses", func() { // nolint:typecheck
+		It("should filter node addresses if matching specified filtered addresses", func() {
 			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameFilteredNodeAddresses)
 			Expect(vm).ToNot(BeNil())
 			addresses, err := m.getNodeAddresses(ctx, vm)
@@ -181,119 +174,52 @@ var _ = Describe("Test Manager", func() { // nolint:typecheck
 			Expect(len(addresses)).To(Equal(2), "Received addresses: %v", addresses)
 			Expect(addresses).Should(ConsistOf(
 				v1.NodeAddress{Type: v1.NodeInternalIP, Address: mock.MockIP},
-				v1.NodeAddress{Type: v1.NodeHostName, Address: *vm.Name},
+				v1.NodeAddress{Type: v1.NodeHostName, Address: *vm.Spec.Name},
 			))
-		})
-
-		It("should fetch the correct node addresses from DpOffloadNicNetworkInfo", func() { // nolint:typecheck
-			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameDpOffload)
-			Expect(vm).ToNot(BeNil())
-			addresses, err := m.getNodeAddresses(ctx, vm)
-			Expect(err).ShouldNot(HaveOccurred())
-			Expect(len(addresses)).To(Equal(2))
-			Expect(addresses).Should(
-				ContainElements(
-					gstruct.MatchFields(
-						gstruct.IgnoreExtras,
-						gstruct.Fields{
-							"Type":    Equal(v1.NodeInternalIP),
-							"Address": Equal(mock.MockIP),
-						},
-					),
-					gstruct.MatchFields(
-						gstruct.IgnoreExtras,
-						gstruct.Fields{
-							"Type":    Equal(v1.NodeHostName),
-							"Address": Equal(*vm.Name),
-						},
-					),
-				),
-			)
-		})
-
-		It("should fetch secondary IP addresses from SecondaryIpAddressList", func() { // nolint:typecheck
-			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameSecondaryIPs)
-			Expect(vm).ToNot(BeNil())
-			addresses, err := m.getNodeAddresses(ctx, vm)
-			Expect(err).ShouldNot(HaveOccurred())
-			// Should have primary IP, 2 secondary IPs, and hostname = 4 addresses
-			Expect(len(addresses)).To(Equal(4))
-			Expect(addresses).Should(
-				ContainElements(
-					gstruct.MatchFields(
-						gstruct.IgnoreExtras,
-						gstruct.Fields{
-							"Type":    Equal(v1.NodeInternalIP),
-							"Address": Equal(mock.MockIP),
-						},
-					),
-					gstruct.MatchFields(
-						gstruct.IgnoreExtras,
-						gstruct.Fields{
-							"Type":    Equal(v1.NodeInternalIP),
-							"Address": Equal(mock.MockSecondaryIP1),
-						},
-					),
-					gstruct.MatchFields(
-						gstruct.IgnoreExtras,
-						gstruct.Fields{
-							"Type":    Equal(v1.NodeInternalIP),
-							"Address": Equal(mock.MockSecondaryIP2),
-						},
-					),
-					gstruct.MatchFields(
-						gstruct.IgnoreExtras,
-						gstruct.Fields{
-							"Type":    Equal(v1.NodeHostName),
-							"Address": Equal(*vm.Name),
-						},
-					),
-				),
-			)
 		})
 	})
 
 	Context("Test generateProviderID", func() {
-		It("should fail if vmUUID is empty", func() { // nolint:typecheck
+		It("should fail if vmUUID is empty", func() {
 			_, err := m.generateProviderID(ctx, "")
 			Expect(err).Should(HaveOccurred())
 		})
 
-		It("should return providerID in valid format", func() { // nolint:typecheck
+		It("should return providerID in valid format", func() {
 			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
 			Expect(vm).ToNot(BeNil())
-			providerID, err := m.generateProviderID(ctx, *vm.ExtId)
+			providerID, err := m.generateProviderID(ctx, *vm.Metadata.UUID)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(providerID).To(Equal(fmt.Sprintf("nutanix://%s", *vm.ExtId)))
+			Expect(providerID).To(Equal(fmt.Sprintf("nutanix://%s", *vm.Metadata.UUID)))
 		})
 	})
 
 	Context("Test getTopologyInfoFromVM", func() {
-		It("should fail if vm is empty", func() { // nolint:typecheck
-			err := m.getTopologyInfoFromVM(ctx, nClient, nil, &config.TopologyInfo{})
+		It("should fail if vm is empty", func() {
+			err := m.getTopologyInfoFromVM(nil, &config.TopologyInfo{})
 			Expect(err).Should(HaveOccurred())
 		})
 
-		It("should fail if topologyInfo is empty", func() { // nolint:typecheck
+		It("should fail if topologyInfo is empty", func() {
 			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
-			err := m.getTopologyInfoFromVM(ctx, nClient, vm, nil)
+			err := m.getTopologyInfoFromVM(vm, nil)
 			Expect(err).Should(HaveOccurred())
 		})
 	})
 
 	Context("Test getTopologyInfoFromCluster", func() {
-		It("should fail if nutanixClient is empty", func() { // nolint:typecheck
+		It("should fail if nutanixClient is empty", func() {
 			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
 			err := m.getTopologyInfoFromCluster(ctx, nil, vm, &config.TopologyInfo{})
 			Expect(err).Should(HaveOccurred())
 		})
 
-		It("should fail if vm is empty", func() { // nolint:typecheck
+		It("should fail if vm is empty", func() {
 			err = m.getTopologyInfoFromCluster(ctx, nClient, nil, &config.TopologyInfo{})
 			Expect(err).Should(HaveOccurred())
 		})
 
-		It("should fail if topologyInfo is empty", func() { // nolint:typecheck
+		It("should fail if topologyInfo is empty", func() {
 			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
 			Expect(err).ToNot(HaveOccurred())
 			err = m.getTopologyInfoFromCluster(ctx, nClient, vm, nil)
@@ -302,13 +228,13 @@ var _ = Describe("Test Manager", func() { // nolint:typecheck
 	})
 
 	Context("Test getTopologyInfoUsingPrism", func() {
-		It("should fail if nutanixClient is empty", func() { // nolint:typecheck
+		It("should fail if nutanixClient is empty", func() {
 			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
 			_, err := m.getTopologyInfoUsingPrism(ctx, nil, vm)
 			Expect(err).Should(HaveOccurred())
 		})
 
-		It("should fail if vm is empty", func() { // nolint:typecheck
+		It("should fail if vm is empty", func() {
 			_, err := m.getTopologyInfoUsingPrism(ctx, nClient, nil)
 			Expect(err).Should(HaveOccurred())
 		})

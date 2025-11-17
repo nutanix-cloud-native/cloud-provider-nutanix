@@ -14,35 +14,33 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-//nolint:typecheck // Mock file uses ginkgo/gomega which typecheck doesn't understand well
 package mock
 
 import (
 	"context"
 
-	clusterModels "github.com/nutanix/ntnx-api-golang-clients/clustermgmt-go-client/v4/models/clustermgmt/v4/config"
-	prismModels "github.com/nutanix/ntnx-api-golang-clients/prism-go-client/v4/models/prism/v4/config"
-	vmmCommonModels "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/common/v1/config"
-	vmmModels "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/vmm/v4/ahv/config"
+	"github.com/nutanix-cloud-native/prism-go-client/utils"
+	prismClientV3 "github.com/nutanix-cloud-native/prism-go-client/v3"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/utils/ptr"
+
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
 )
 
 type MockEnvironment struct {
-	managedMockMachines   map[string]*vmmModels.Vm
-	managedMockClusters   map[string]*clusterModels.Cluster
-	managedMockHosts      map[string]*clusterModels.Host
-	managedMockCategories map[string]*prismModels.Category
-	managedNodes          map[string]*v1.Node
-	vmNameToExtId         map[string]string
+	managedMockMachines map[string]*prismClientV3.VMIntentResponse
+	managedMockClusters map[string]*prismClientV3.ClusterIntentResponse
+	managedNodes        map[string]*v1.Node
 }
 
-func (m *MockEnvironment) GetVM(ctx context.Context, vmName string) *vmmModels.Vm {
-	if extId, ok := m.vmNameToExtId[vmName]; ok {
-		return m.managedMockMachines[extId]
+func (m *MockEnvironment) GetVM(ctx context.Context, vmName string) *prismClientV3.VMIntentResponse {
+	for _, v := range m.managedMockMachines {
+		if *v.Spec.Name == vmName {
+			return v
+		}
 	}
 	return nil
 }
@@ -54,89 +52,78 @@ func (m *MockEnvironment) GetNode(nodeName string) *v1.Node {
 	return nil
 }
 
-func (m *MockEnvironment) GetCluster(ctx context.Context, clusterName string) *clusterModels.Cluster {
+func (m *MockEnvironment) GetCluster(ctx context.Context, clusterName string) *prismClientV3.ClusterIntentResponse {
 	for _, v := range m.managedMockClusters {
-		if *v.Name == clusterName {
+		if *v.Spec.Name == clusterName {
 			return v
 		}
 	}
 	return nil
 }
 
-func (m *MockEnvironment) AddCluster(cluster *clusterModels.Cluster) *clusterModels.Cluster {
-	Expect(cluster).ToNot(BeNil()) // nolint:typecheck
-	m.managedMockClusters[*cluster.ExtId] = cluster
+func (m *MockEnvironment) AddCluster(cluster *prismClientV3.ClusterIntentResponse) *prismClientV3.ClusterIntentResponse {
+	Expect(cluster).ToNot(BeNil())
+	m.managedMockClusters[*cluster.Metadata.UUID] = cluster
 	return nil
 }
 
 func (m *MockEnvironment) DeleteCluster(clusterUUID string) {
-	Expect(clusterUUID).ToNot(BeEmpty()) // nolint:typecheck
+	Expect(clusterUUID).ToNot(BeEmpty())
 	delete(m.managedMockClusters, clusterUUID)
 }
 
 func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockEnvironment, error) {
-	// Create clusters with consistent UUIDs
-	cluster := getDefaultCluster(MockCluster, MockClusterUUID)
-	pc := CreatePrismCentralCluster(MockPrismCentral, MockPrismCentralUUID)
-	clusterCategories := getDefaultCluster(mockClusterCategories, MockClusterCategoriesUUID)
+	cluster := getDefaultClusterSpec(MockCluster)
+	pc := CreatePrismCentralCluster(MockPrismCentral)
 
-	// Create host with consistent UUID
-	host := getDefaultHost(mockHost, MockHostUUID, MockClusterUUID)
+	clusterCategories := getDefaultClusterSpec(mockClusterCategories)
+	clusterCategories.Metadata.Categories[MockDefaultRegion] = MockRegion
+	clusterCategories.Metadata.Categories[MockDefaultZone] = MockZone
 
-	// Create categories with consistent UUIDs
-	regionCategory := getDefaultCategory(MockDefaultRegion, MockCategoryRegionUUID, MockRegion)
-	zoneCategory := getDefaultCategory(MockDefaultZone, MockCategoryZoneUUID, MockZone)
-
-	// Create VMs with consistent UUIDs
-	poweredOnVM := getDefaultVM(MockVMNamePoweredOn, MockVMPoweredOnUUID, cluster, host)
+	poweredOnVM := getDefaultVMSpec(MockVMNamePoweredOn, cluster)
 	poweredOnNode, err := createNodeForVM(ctx, kClient, poweredOnVM)
 	if err != nil {
 		return nil, err
 	}
 
-	poweredOffVM := getDefaultVM(MockVMNamePoweredOff, MockVMPoweredOffUUID, cluster, nil) // PoweredOff VMs do not have host ref
-	poweredOffVM.PowerState = vmmModels.POWERSTATE_OFF.Ref()
-	poweredOffVM.Cluster = &vmmModels.ClusterReference{
-		ExtId: ptr.To(MockClusterUUID),
-	}
+	poweredOffVM := getDefaultVMSpec(MockVMNamePoweredOff, cluster)
+	// PoweredOff Vms do not have host ref
+	poweredOffVM.Status.Resources.HostReference = &prismClientV3.Reference{}
+	poweredOffVM.Spec.Resources.PowerState = utils.StringPtr(constants.PoweredOffState)
 	poweredOffNode, err := createNodeForVM(ctx, kClient, poweredOffVM)
 	if err != nil {
 		return nil, err
 	}
 
-	categoriesVM := getDefaultVM(MockVMNameCategories, MockVMCategoriesUUID, cluster, host)
-	categoriesVM.Categories = []vmmModels.CategoryReference{
-		{ExtId: regionCategory.ExtId},
-		{ExtId: zoneCategory.ExtId},
-	}
+	categoriesVM := getDefaultVMSpec(MockVMNameCategories, cluster)
+	categoriesVM.Metadata.Categories[MockDefaultRegion] = MockRegion
+	categoriesVM.Metadata.Categories[MockDefaultZone] = MockZone
 	categoriesNode, err := createNodeForVM(ctx, kClient, categoriesVM)
 	if err != nil {
 		return nil, err
 	}
 
-	noAddressesVM := getDefaultVM(MockVMNameNoAddresses, MockVMNoAddressesUUID, cluster, host)
-	noAddressesVM.Nics = nil
+	noAddressesVM := getDefaultVMSpec(MockVMNameNoAddresses, cluster)
+	noAddressesVM.Status.Resources.NicList = nil
 	noAddressesNode, err := createNodeForVM(ctx, kClient, noAddressesVM)
 	if err != nil {
 		return nil, err
 	}
 
-	filteredAddressesVM := getDefaultVM(MockVMNameFilteredNodeAddresses, MockVMFilteredAddressesUUID, cluster, host)
-	// Create multiple NICs with different IPs
-	filteredNics := make([]vmmModels.Nic, 0)
-	ipAddresses := []string{"127.100.10.1", "127.200.20.1", "127.200.100.64", "127.200.200.10", MockIP}
-	for _, ip := range ipAddresses {
-		nic := vmmModels.NewNic()
-		nicNetInfo := vmmModels.NewVirtualEthernetNicNetworkInfo()
-		nicNetInfo.Ipv4Config = vmmModels.NewIpv4Config()
-		nicNetInfo.Ipv4Config.IpAddress = &vmmCommonModels.IPv4Address{
-			Value: ptr.To(ip),
-		}
-		nicNetInfo.Ipv4Info = vmmModels.NewIpv4Info()
-		nic.SetNicNetworkInfo(*nicNetInfo)
-		filteredNics = append(filteredNics, *nic)
-	}
-	filteredAddressesVM.Nics = filteredNics
+	filteredAddressesVM := getDefaultVMSpec(MockVMNameFilteredNodeAddresses, cluster)
+	filteredAddressesVM.Status.Resources.NicList = []*prismClientV3.VMNicOutputStatus{{
+		IPEndpointList: []*prismClientV3.IPAddress{{
+			IP: ptr.To("127.100.10.1"),
+		}, {
+			IP: ptr.To("127.200.20.1"),
+		}, {
+			IP: ptr.To("127.200.100.64"),
+		}, {
+			IP: ptr.To("127.200.200.10"),
+		}, {
+			IP: ptr.To(MockIP),
+		}},
+	}}
 	filteredAddressesNode, err := createNodeForVM(ctx, kClient, filteredAddressesVM)
 	if err != nil {
 		return nil, err
@@ -159,50 +146,25 @@ func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockE
 		},
 	}
 
-	poweredOnVMClusterCategories := getDefaultVM(MockVMNamePoweredOnClusterCategories, MockVMPoweredOnClusterCategoriesUUID, clusterCategories, host)
-	poweredOnVMClusterCategories.Categories = []vmmModels.CategoryReference{
-		{ExtId: regionCategory.ExtId},
-		{ExtId: zoneCategory.ExtId},
-	}
+	poweredOnVMClusterCategories := getDefaultVMSpec(MockVMNamePoweredOnClusterCategories, clusterCategories)
 	poweredOnClusterCategoriesNode, err := createNodeForVM(ctx, kClient, poweredOnVMClusterCategories)
 	if err != nil {
 		return nil, err
 	}
 
-	dpOffloadVM := getDefaultVMWithDpOffload(MockVMNameDpOffload, MockVMDpOffloadUUID, cluster, host)
-	dpOffloadNode, err := createNodeForVM(ctx, kClient, dpOffloadVM)
-	if err != nil {
-		return nil, err
-	}
-
-	secondaryIPsVM := getDefaultVMWithSecondaryIPs(MockVMNameSecondaryIPs, MockVMSecondaryIPsUUID, cluster, host)
-	secondaryIPsNode, err := createNodeForVM(ctx, kClient, secondaryIPsVM)
-	if err != nil {
-		return nil, err
-	}
-
 	return &MockEnvironment{
-		managedMockMachines: map[string]*vmmModels.Vm{
-			*poweredOnVM.ExtId:                  poweredOnVM,
-			*poweredOffVM.ExtId:                 poweredOffVM,
-			*categoriesVM.ExtId:                 categoriesVM,
-			*noAddressesVM.ExtId:                noAddressesVM,
-			*poweredOnVMClusterCategories.ExtId: poweredOnVMClusterCategories,
-			*filteredAddressesVM.ExtId:          filteredAddressesVM,
-			*dpOffloadVM.ExtId:                  dpOffloadVM,
-			*secondaryIPsVM.ExtId:               secondaryIPsVM,
+		managedMockMachines: map[string]*prismClientV3.VMIntentResponse{
+			*poweredOnVM.Metadata.UUID:                  poweredOnVM,
+			*poweredOffVM.Metadata.UUID:                 poweredOffVM,
+			*categoriesVM.Metadata.UUID:                 categoriesVM,
+			*noAddressesVM.Metadata.UUID:                noAddressesVM,
+			*poweredOnVMClusterCategories.Metadata.UUID: poweredOnVMClusterCategories,
+			*filteredAddressesVM.Metadata.UUID:          filteredAddressesVM,
 		},
-		managedMockClusters: map[string]*clusterModels.Cluster{
-			*cluster.ExtId:           cluster,
-			*clusterCategories.ExtId: clusterCategories,
-			*pc.ExtId:                pc,
-		},
-		managedMockHosts: map[string]*clusterModels.Host{
-			*host.ExtId: host,
-		},
-		managedMockCategories: map[string]*prismModels.Category{
-			*regionCategory.ExtId: regionCategory,
-			*zoneCategory.ExtId:   zoneCategory,
+		managedMockClusters: map[string]*prismClientV3.ClusterIntentResponse{
+			*cluster.Metadata.UUID:           cluster,
+			*clusterCategories.Metadata.UUID: clusterCategories,
+			*pc.Metadata.UUID:                pc,
 		},
 		managedNodes: map[string]*v1.Node{
 			MockVMNamePoweredOn:                  poweredOnNode,
@@ -213,18 +175,6 @@ func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockE
 			MockNodeNameNoSystemUUID:             noSystemUUIDNode,
 			MockVMNamePoweredOnClusterCategories: poweredOnClusterCategoriesNode,
 			MockVMNameFilteredNodeAddresses:      filteredAddressesNode,
-			MockVMNameDpOffload:                  dpOffloadNode,
-			MockVMNameSecondaryIPs:               secondaryIPsNode,
-		},
-		vmNameToExtId: map[string]string{
-			MockVMNamePoweredOn:                  *poweredOnVM.ExtId,
-			MockVMNamePoweredOff:                 *poweredOffVM.ExtId,
-			MockVMNameCategories:                 *categoriesVM.ExtId,
-			MockVMNameNoAddresses:                *noAddressesVM.ExtId,
-			MockVMNameFilteredNodeAddresses:      *filteredAddressesVM.ExtId,
-			MockVMNamePoweredOnClusterCategories: *poweredOnVMClusterCategories.ExtId,
-			MockVMNameDpOffload:                  *dpOffloadVM.ExtId,
-			MockVMNameSecondaryIPs:               *secondaryIPsVM.ExtId,
 		},
 	}, nil
 }
