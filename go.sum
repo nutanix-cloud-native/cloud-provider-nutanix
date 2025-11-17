@@ -123,8 +123,8 @@ github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee h1:W5t00kpgFd
 github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee/go.mod h1:yWuevngMOJpCy52FWWMvUC8ws7m/LJsjYzDa0/r8luk=
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq1c1nUAm88MOHcQC9l5mIlSMApZMrHA=
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=
-github.com/nutanix-cloud-native/prism-go-client v0.5.2-0.20251106041916-16dbf114b71e h1:RKC+0aPkrFbtQcJIvFBt6NftcNZEqtcbCevw9NelEhQ=
-github.com/nutanix-cloud-native/prism-go-client v0.5.2-0.20251106041916-16dbf114b71e/go.mod h1:MGMzqONi2f9aZHeWwQYwL5j/r6Kxv56g6VIvkVFIlbU=
+github.com/nutanix-cloud-native/prism-go-client v0.6.0 h1:aNWmQaVZnjfY7g5hxfBv0t+bpA4HlTNGHMU1NJeXKlA=
+github.com/nutanix-cloud-native/prism-go-client v0.6.0/go.mod h1:MGMzqONi2f9aZHeWwQYwL5j/r6Kxv56g6VIvkVFIlbU=
 github.com/nutanix/ntnx-api-golang-clients/clustermgmt-go-client/v4 v4.1.1 h1:4ZkiY4yavcy3Suwi5ntofjh3mzL3muTCVs9OPkZ940k=
 github.com/nutanix/ntnx-api-golang-clients/clustermgmt-go-client/v4 v4.1.1/go.mod h1:sd4Fnk6MVfEDVY+8WyRoQTmLhi2SgZ3riySWErVHf8E=
 github.com/nutanix/ntnx-api-golang-clients/networking-go-client/v4 v4.1.1 h1:XqAQX+sT8EZBRoJbhBm2jpjYGnHd//mjx1PjQI+zIGQ=
