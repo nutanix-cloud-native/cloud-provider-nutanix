@@ -6,7 +6,7 @@ toolchain go1.24.5
 
 require (
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/nutanix-cloud-native/prism-go-client v0.5.4
+	github.com/nutanix-cloud-native/prism-go-client v0.6.0
 	github.com/onsi/ginkgo/v2 v2.23.4
 	github.com/onsi/gomega v1.37.0
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba
@@ -128,5 +128,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.0 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
-
-replace github.com/nutanix-cloud-native/prism-go-client => github.com/nutanix-cloud-native/prism-go-client v0.5.2-0.20251106041916-16dbf114b71e
