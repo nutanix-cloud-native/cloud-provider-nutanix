@@ -30,6 +30,7 @@ import (
 	vmmModels "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/vmm/v4/ahv/config"
 	"go4.org/netipx"
 	v1 "k8s.io/api/core/v1"
+	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 	cloudprovider "k8s.io/cloud-provider"
@@ -458,73 +459,94 @@ func (n *nutanixManager) stripNutanixIDFromProviderID(providerID string) string 
 	return strings.TrimPrefix(providerID, fmt.Sprintf("%s://", constants.ProviderName))
 }
 
-func (n *nutanixManager) getTopologyInfo(ctx context.Context, nutanixClient interfaces.Prism, vm *vmmModels.Vm) (config.TopologyInfo, error) {
+func (n *nutanixManager) getTopologyInfo(ctx context.Context, nutanixClient interfaces.Prism, vm *vmmModels.Vm) (*config.TopologyInfo, error) {
 	topologyDiscovery := n.config.TopologyDiscovery
+	topologyInfo := &config.TopologyInfo{}
 
 	switch topologyDiscovery.Type {
 	case config.PrismTopologyDiscoveryType:
-		return n.getTopologyInfoUsingPrism(ctx, nutanixClient, vm)
+		if err := n.getTopologyInfoUsingPrism(ctx, nutanixClient, vm, topologyInfo); err != nil {
+			return nil, err
+		}
 	case config.CategoriesTopologyDiscoveryType:
-		return n.getTopologyInfoUsingCategories(ctx, nutanixClient, vm)
+		if err := n.getTopologyInfoUsingCategories(ctx, nutanixClient, vm, topologyInfo); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unsupported topology discovery type: %s", topologyDiscovery.Type)
 	}
-	return config.TopologyInfo{}, fmt.Errorf("unsupported topology discovery type: %s", topologyDiscovery.Type)
+
+	// workaround for bug NCN-110986
+	// The Region and Zone values are used by the upstream to set these label values:
+	// topology.kubernetes.io/region and topology.kubernetes.io/zone
+	// The K8s label value must meet the regex: ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,61}[a-zA-Z0-9]$
+	if errs := k8svalidation.IsValidLabelValue(topologyInfo.Region); len(errs) > 0 {
+		sanitizedVal := SanitizeK8sLabelValue(topologyInfo.Region)
+		klog.Warningf("Sanitize the region value to meet the Kubernetes label value requirement. original: %q, sanitized: %q. Otherwise, the K8s node controler will report error: %v", topologyInfo.Region, sanitizedVal, errs)
+		topologyInfo.Region = sanitizedVal
+	}
+	if errs := k8svalidation.IsValidLabelValue(topologyInfo.Zone); len(errs) > 0 {
+		sanitizedVal := SanitizeK8sLabelValue(topologyInfo.Zone)
+		klog.Warningf("Sanitize the zone value to meet the Kubernetes label value requirement. original: %q, sanitized: %q. Otherwise, the K8s node controler will report error: %v", topologyInfo.Zone, sanitizedVal, errs)
+		topologyInfo.Zone = sanitizedVal
+	}
+
+	return topologyInfo, nil
 }
 
-func (n *nutanixManager) getTopologyInfoUsingPrism(ctx context.Context, nClient interfaces.Prism, vm *vmmModels.Vm) (config.TopologyInfo, error) {
-	ti := config.TopologyInfo{}
+func (n *nutanixManager) getTopologyInfoUsingPrism(ctx context.Context, nClient interfaces.Prism, vm *vmmModels.Vm, topologyInfo *config.TopologyInfo) error {
 	if nClient == nil {
-		return ti, fmt.Errorf("nutanix client cannot be nil when searching for Prism topology info")
+		return fmt.Errorf("nutanix client cannot be nil when searching for Prism topology info")
 	}
 	if vm == nil {
-		return ti, fmt.Errorf("vm cannot be nil when searching for Prism topology info")
+		return fmt.Errorf("vm cannot be nil when searching for Prism topology info")
 	}
 
 	if vm.Cluster == nil || vm.Cluster.ExtId == nil || *vm.Cluster.ExtId == "" {
-		return ti, fmt.Errorf("cannot determine Prism zone information for vm %s", *vm.ExtId)
+		return fmt.Errorf("cannot determine Prism zone information for vm %s", *vm.ExtId)
 	}
 
 	pc, err := n.getPrismCentralCluster(ctx, nClient)
 	if err != nil {
-		return ti, err
+		return err
 	}
 
 	cluster, err := nClient.GetCluster(ctx, *vm.Cluster.ExtId)
 	if err != nil {
-		return ti, err
+		return err
 	}
 
-	ti.Region = *pc.Name
-	ti.Zone = *cluster.Name
-	return ti, nil
+	topologyInfo.Region = *pc.Name
+	topologyInfo.Zone = *cluster.Name
+	return nil
 }
 
-func (n *nutanixManager) getTopologyInfoUsingCategories(ctx context.Context, nutanixClient interfaces.Prism, vm *vmmModels.Vm) (config.TopologyInfo, error) {
-	tc := &config.TopologyInfo{}
+func (n *nutanixManager) getTopologyInfoUsingCategories(ctx context.Context, nutanixClient interfaces.Prism, vm *vmmModels.Vm, topologyInfo *config.TopologyInfo) error {
 	if vm == nil {
-		return *tc, fmt.Errorf("vm cannot be nil while getting topology info")
+		return fmt.Errorf("vm cannot be nil while getting topology info")
 	}
 	klog.V(1).Infof("searching for topology info on VM entity: %s", *vm.Name) //nolint:typecheck
-	err := n.getTopologyInfoFromVM(ctx, nutanixClient, vm, tc)
+	err := n.getTopologyInfoFromVM(ctx, nutanixClient, vm, topologyInfo)
 	if err != nil {
-		return *tc, err
+		return err
 	}
-	if !n.hasEmptyTopologyInfo(*tc) {
-		klog.V(1).Infof("topology info was found on VM entity: %+v", *tc) //nolint:typecheck
-		return *tc, nil
+	if !n.hasEmptyTopologyInfo(*topologyInfo) {
+		klog.V(1).Infof("topology info was found on VM entity: %+v", *topologyInfo) //nolint:typecheck
+		return nil
 	}
 	klog.V(1).Infof("searching for topology info on host entity for VM: %s", *vm.Name) //nolint:typecheck
 	nClient, err := n.nutanixClient.Get()
 	if err != nil {
-		return *tc, err
+		return err
 	}
 
 	klog.V(1).Infof("searching for topology info on cluster entity for VM: %s", *vm.Name) //nolint:typecheck
-	err = n.getTopologyInfoFromCluster(ctx, nClient, vm, tc)
+	err = n.getTopologyInfoFromCluster(ctx, nClient, vm, topologyInfo)
 	if err != nil {
-		return *tc, err
+		return err
 	}
-	klog.V(1).Infof("topology info after searching cluster: %+v", *tc) //nolint:typecheck
-	return *tc, nil
+	klog.V(1).Infof("topology info after searching cluster: %+v", *topologyInfo) //nolint:typecheck
+	return nil
 }
 
 func (n *nutanixManager) getZoneInfoFromCategories(ctx context.Context, nClient interfaces.Prism, categoryUUIDs []string, ti *config.TopologyInfo) error {

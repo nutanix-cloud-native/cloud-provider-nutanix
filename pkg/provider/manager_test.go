@@ -304,12 +304,12 @@ var _ = Describe("Test Manager", func() { // nolint:typecheck
 	Context("Test getTopologyInfoUsingPrism", func() {
 		It("should fail if nutanixClient is empty", func() { // nolint:typecheck
 			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
-			_, err := m.getTopologyInfoUsingPrism(ctx, nil, vm)
+			err := m.getTopologyInfoUsingPrism(ctx, nil, vm, nil)
 			Expect(err).Should(HaveOccurred())
 		})
 
 		It("should fail if vm is empty", func() { // nolint:typecheck
-			_, err := m.getTopologyInfoUsingPrism(ctx, nClient, nil)
+			err := m.getTopologyInfoUsingPrism(ctx, nClient, nil, nil)
 			Expect(err).Should(HaveOccurred())
 		})
 	})

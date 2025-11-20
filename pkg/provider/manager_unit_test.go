@@ -81,3 +81,45 @@ func TestIsNodeAddressesSet(t *testing.T) {
 		})
 	}
 }
+
+func TestSanitizeK8sLabelValue(t *testing.T) {
+	tests := []struct {
+		name      string
+		inStr     string
+		expectStr string
+	}{
+		{
+			name:      "valid label value",
+			inStr:     "PC-1.name",
+			expectStr: "PC-1.name",
+		},
+		{
+			name:      "with spaces",
+			inStr:     "PC-1 name",
+			expectStr: "PC-1_name",
+		},
+		{
+			name:      "with other invalid chars",
+			inStr:     "PC-1@name",
+			expectStr: "PC-1_name",
+		},
+		{
+			name:      "starts/ends with non-alphanumberic char",
+			inStr:     "__PC-1@name__",
+			expectStr: "PC-1_name",
+		},
+		{
+			name:      "with slash char",
+			inStr:     "PC/1/name",
+			expectStr: "PC_1_name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := SanitizeK8sLabelValue(tt.inStr); got != tt.expectStr {
+				t.Errorf("SanitizeK8sLabelValue() did not output the expected value: input=%q, got=%q, expected=%q", tt.inStr, got, tt.expectStr)
+			}
+		})
+	}
+}
