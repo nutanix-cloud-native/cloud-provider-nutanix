@@ -12,6 +12,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        # fetch-depth: 0 is required to fetch full git history and tags
+        # so we can validate release tags against their source branches
         with:
           fetch-depth: 0
 
