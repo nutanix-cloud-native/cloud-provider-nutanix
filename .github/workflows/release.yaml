@@ -3,7 +3,7 @@ name: Generate release artefact
 on:
   push:
     tags:
-      - "v*.*.*"
+      - "v1.*.*"
 
 jobs:
   build_release:
@@ -12,6 +12,26 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate tag matches release branch
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+
+          VERSION=$(echo "$TAG" | sed -E 's/^v([0-9]+\.[0-9]+).*/\1/')
+          EXPECTED_BRANCH="release-$VERSION"
+
+          BRANCH=$(git branch -r --contains "$GITHUB_SHA" | grep origin/ | sed 's|origin/||' | head -n1)
+
+          echo "Tag: $TAG"
+          echo "Expected branch: $EXPECTED_BRANCH"
+          echo "Actual branch: $BRANCH"
+
+          if [[ "$BRANCH" != "$EXPECTED_BRANCH" ]]; then
+            echo "::error::Tag $TAG must be created from $EXPECTED_BRANCH"
+            exit 1
+          fi
 
       - name: Install devbox
         run: curl -fsSL https://get.jetpack.io/devbox | bash -s -- -f
