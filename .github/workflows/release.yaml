@@ -24,7 +24,7 @@ jobs:
           VERSION=$(echo "$TAG" | sed -E 's/^v([0-9]+\.[0-9]+).*/\1/')
           EXPECTED_BRANCH="release-$VERSION"
 
-          BRANCH=$(git branch -r --contains "$GITHUB_SHA" | grep origin/ | sed 's|origin/||' | head -n1)
+          BRANCH=$(git branch -r --contains "$GITHUB_SHA" 2>/dev/null | grep origin/ | sed 's|origin/||' | head -n1)
 
           echo "Tag: $TAG"
           echo "Expected branch: $EXPECTED_BRANCH"
