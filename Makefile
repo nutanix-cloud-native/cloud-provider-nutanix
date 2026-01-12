@@ -2,7 +2,7 @@
 VERSION = $(shell git describe --tags --always --dirty)
 REPO_ROOT := $(shell git rev-parse --show-toplevel)
 ARTIFACTS ?= ${REPO_ROOT}/_artifacts
-PLATFORMS ?= linux/amd64
+PLATFORMS ?= linux/amd64,linux/arm64,linux/arm
 
 EXPORT_RESULT?=false # for CI please set EXPORT_RESULT to true
 
