@@ -34,9 +34,11 @@ const (
 	MockVMNamePoweredOnClusterCategories = "mock-vm-poweredon-cluster-categories"
 	MockVMNameDpOffload                  = "mock-vm-dp-offload"
 	MockVMNameSecondaryIPs               = "mock-vm-secondary-ips"
+	MockVMNameCustomProviderID           = "mock-vm-custom-provider-id"
 
-	MockSecondaryIP1 = "2.2.2.2"
-	MockSecondaryIP2 = "3.3.3.3"
+	MockSecondaryIP1     = "2.2.2.2"
+	MockSecondaryIP2     = "3.3.3.3"
+	MockCustomProviderID = "custom-provider-uuid-1234"
 
 	MockNodeNameVMNotExisting = "mock-node-no-vm-exists"
 	MockNodeNameNoSystemUUID  = "mock-node-no-system-uuid"
@@ -65,6 +67,7 @@ const (
 	MockVMPoweredOnClusterCategoriesUUID = "00000000-0000-0000-0000-000000000105"
 	MockVMDpOffloadUUID                  = "00000000-0000-0000-0000-000000000106"
 	MockVMSecondaryIPsUUID               = "00000000-0000-0000-0000-000000000107"
+	MockVMCustomProviderIDUUID           = "00000000-0000-0000-0000-000000000108"
 	MockCategoryRegionUUID               = "00000000-0000-0000-0000-000000000200"
 	MockCategoryZoneUUID                 = "00000000-0000-0000-0000-000000000201"
 )
