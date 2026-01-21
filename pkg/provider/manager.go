@@ -338,7 +338,7 @@ func (n *nutanixManager) generateProviderIDFromVM(ctx context.Context, vm *vmmMo
 		for _, attr := range vm.CustomAttributes {
 			// customAttributes are in the format "key:value"
 			parts := strings.SplitN(attr, ":", 2)
-			if len(parts) == 2 && strings.TrimSpace(parts[0]) == "providerID" {
+			if len(parts) == 2 && strings.TrimSpace(parts[0]) == "providerid" {
 				customProviderID := strings.TrimSpace(parts[1])
 				if customProviderID != "" {
 					klog.V(2).Infof("Using custom providerID from customAttributes: %s", customProviderID) //nolint:typecheck
