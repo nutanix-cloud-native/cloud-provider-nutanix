@@ -123,15 +123,17 @@ func (n *nutanixManager) getInstanceMetadata(ctx context.Context, node *v1.Node)
 		return nil, err
 	}
 
-	providerID, err := n.generateProviderID(ctx, vmUUID)
-	if err != nil {
-		return nil, err
-	}
 	nClient, err := n.nutanixClient.Get()
 	if err != nil {
 		return nil, err
 	}
 	vm, err := nClient.GetVM(ctx, vmUUID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Generate providerID from VM (checks customAttributes first, then falls back to vmUUID)
+	providerID, err := n.generateProviderIDFromVM(ctx, vm)
 	if err != nil {
 		return nil, err
 	}
@@ -320,6 +322,39 @@ func (n *nutanixManager) generateProviderID(ctx context.Context, vmUUID string) 
 	}
 
 	return fmt.Sprintf("%s://%s", constants.ProviderName, strings.ToLower(vmUUID)), nil
+}
+
+// generateProviderIDFromVM generates the providerID for a node from the VM object.
+// It first checks if the VM's customAttributes field has "providerID:<UUID>".
+// If yes, it uses this UUID value to set the providerID.
+// If not, it falls back to using the vmUUID (backward compatible).
+func (n *nutanixManager) generateProviderIDFromVM(ctx context.Context, vm *vmmModels.Vm) (string, error) {
+	if vm == nil {
+		return "", fmt.Errorf("VM cannot be nil when generating nutanix provider ID for node")
+	}
+
+	// Check if customAttributes contains providerID
+	if vm.CustomAttributes != nil {
+		for _, attr := range vm.CustomAttributes {
+			// customAttributes are in the format "key:value"
+			parts := strings.SplitN(attr, ":", 2)
+			if len(parts) == 2 && strings.ToLower(strings.TrimSpace(parts[0])) == "providerid" {
+				customProviderID := strings.TrimSpace(parts[1])
+				if customProviderID != "" {
+					klog.V(2).Infof("Using custom providerID from customAttributes: %s", customProviderID) //nolint:typecheck
+					return fmt.Sprintf("%s://%s", constants.ProviderName, customProviderID), nil
+				}
+			}
+		}
+	}
+
+	// Fallback to using vmUUID
+	if vm.ExtId == nil || *vm.ExtId == "" {
+		return "", fmt.Errorf("VM ExtId cannot be empty when generating nutanix provider ID for node")
+	}
+
+	klog.V(2).Infof("Using VM ExtId as providerID: %s", *vm.ExtId) //nolint:typecheck
+	return fmt.Sprintf("%s://%s", constants.ProviderName, strings.ToLower(*vm.ExtId)), nil
 }
 
 func (n *nutanixManager) isNodeAddressesSet(node *v1.Node) bool {

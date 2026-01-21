@@ -181,6 +181,18 @@ func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockE
 		return nil, err
 	}
 
+	customProviderIDVM := getDefaultVMWithCustomAttributes(
+		MockVMNameCustomProviderID,
+		MockVMCustomProviderIDUUID,
+		cluster,
+		host,
+		[]string{"providerID:" + MockCustomProviderID, "otherKey:otherValue"},
+	)
+	customProviderIDNode, err := createNodeForVM(ctx, kClient, customProviderIDVM)
+	if err != nil {
+		return nil, err
+	}
+
 	return &MockEnvironment{
 		managedMockMachines: map[string]*vmmModels.Vm{
 			*poweredOnVM.ExtId:                  poweredOnVM,
@@ -191,6 +203,7 @@ func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockE
 			*filteredAddressesVM.ExtId:          filteredAddressesVM,
 			*dpOffloadVM.ExtId:                  dpOffloadVM,
 			*secondaryIPsVM.ExtId:               secondaryIPsVM,
+			*customProviderIDVM.ExtId:           customProviderIDVM,
 		},
 		managedMockClusters: map[string]*clusterModels.Cluster{
 			*cluster.ExtId:           cluster,
@@ -215,6 +228,7 @@ func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockE
 			MockVMNameFilteredNodeAddresses:      filteredAddressesNode,
 			MockVMNameDpOffload:                  dpOffloadNode,
 			MockVMNameSecondaryIPs:               secondaryIPsNode,
+			MockVMNameCustomProviderID:           customProviderIDNode,
 		},
 		vmNameToExtId: map[string]string{
 			MockVMNamePoweredOn:                  *poweredOnVM.ExtId,
@@ -225,6 +239,7 @@ func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockE
 			MockVMNamePoweredOnClusterCategories: *poweredOnVMClusterCategories.ExtId,
 			MockVMNameDpOffload:                  *dpOffloadVM.ExtId,
 			MockVMNameSecondaryIPs:               *secondaryIPsVM.ExtId,
+			MockVMNameCustomProviderID:           *customProviderIDVM.ExtId,
 		},
 	}, nil
 }
