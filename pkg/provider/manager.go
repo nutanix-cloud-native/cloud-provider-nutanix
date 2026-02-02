@@ -379,8 +379,8 @@ func (n *nutanixManager) isNodeAddressesSet(node *v1.Node) bool {
 }
 
 func (n *nutanixManager) getNodeAddresses(_ context.Context, vm *vmmModels.Vm) ([]v1.NodeAddress, error) {
-	var addressSet *set.Set[v1.NodeAddress]
 	var addresses []v1.NodeAddress
+	uniqueIPs := set.New[string](0)
 
 	if vm == nil {
 		return nil, fmt.Errorf("vm cannot be nil when getting node addresses")
@@ -390,36 +390,48 @@ func (n *nutanixManager) getNodeAddresses(_ context.Context, vm *vmmModels.Vm) (
 		return nil, fmt.Errorf("unable to determine network interfaces from VM with UUID %s: vm has no nics", *vm.ExtId)
 	}
 
-	addressSet = set.From([]v1.NodeAddress{}) //nolint:typecheck
 	for _, nic := range vm.Nics {
 		if nic.NicNetworkInfo == nil {
 			continue
 		}
 
+		var vmAddresses []v1.NodeAddress
+		var err error
 		switch nic.NicNetworkInfo.GetValue().(type) {
 		case vmmModels.VirtualEthernetNicNetworkInfo:
 			netInfo := nic.NicNetworkInfo.GetValue().(vmmModels.VirtualEthernetNicNetworkInfo)
-			vmAddressSet, err := n.getNodeAddressesFromNicNetworkInfo(netInfo.Ipv4Config, netInfo.Ipv4Info)
+
+			vmAddresses, err = n.getNodeAddressesFromNicNetworkInfo(netInfo.Ipv4Config, netInfo.Ipv4Info)
 			if err != nil {
 				return nil, err
 			}
-			addressSet.InsertSlice(vmAddressSet)
 
 		case vmmModels.DpOffloadNicNetworkInfo:
 			netInfo := nic.NicNetworkInfo.GetValue().(vmmModels.DpOffloadNicNetworkInfo)
-			vmAddressSet, err := n.getNodeAddressesFromNicNetworkInfo(netInfo.Ipv4Config, netInfo.Ipv4Info)
+			vmAddresses, err = n.getNodeAddressesFromNicNetworkInfo(netInfo.Ipv4Config, netInfo.Ipv4Info)
 			if err != nil {
 				return nil, err
 			}
-			addressSet.InsertSlice(vmAddressSet)
 
 		default:
 			klog.V(1).Infof("unsupported NIC network info type: %T", nic.NicNetworkInfo.GetValue()) //nolint:typecheck
 			continue
 		}
-	}
 
-	addresses = append(addresses, addressSet.Slice()...)
+		// At this point, every NIC has no duplicates in its own set of addresses.
+		// However, there can be duplicates across the sets of addresses of different NICs,
+		// so we ignore the duplicates.
+		for _, addr := range vmAddresses {
+			if addr.Type != v1.NodeInternalIP {
+				addresses = append(addresses, addr)
+				continue
+			}
+			if !uniqueIPs.Contains(addr.Address) {
+				uniqueIPs.Insert(addr.Address)
+				addresses = append(addresses, addr)
+			}
+		}
+	}
 
 	if len(addresses) == 0 {
 		return addresses, fmt.Errorf("unable to determine network interfaces from VM with UUID %s", *vm.ExtId)
