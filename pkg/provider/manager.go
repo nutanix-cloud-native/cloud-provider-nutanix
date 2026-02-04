@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"sort"
 	"strings"
 
 	convergedV4 "github.com/nutanix-cloud-native/prism-go-client/converged/v4"
@@ -498,7 +499,14 @@ func (n *nutanixManager) getNodeAddressesFromNicNetworkInfo(ipv4Config *vmmModel
 			}
 		}
 	}
-	return addressSet.Slice(), nil
+
+	// Callers rely on the order of the addresses, so we sort them to ensure consistency.
+	addresses := addressSet.Slice()
+	sort.Slice(addresses, func(i, j int) bool {
+		return addresses[i].Address < addresses[j].Address
+	})
+
+	return addresses, nil
 }
 
 func (n *nutanixManager) stripNutanixIDFromProviderID(providerID string) string {
