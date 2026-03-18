@@ -33,4 +33,7 @@ const (
 	CustomHostNameLabel string = "nutanix.com/prism-host-name"
 
 	PrismCentralService string = "PRISM_CENTRAL"
+
+	VmCustomAttributePrefix4ProviderID       = "providerid:"
+	VmCustomAttributePrefix4MetroPreferredPE = "metro-preferred-pe:"
 )
