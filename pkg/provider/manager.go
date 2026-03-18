@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/nutanix-cloud-native/prism-go-client/converged"
 	convergedV4 "github.com/nutanix-cloud-native/prism-go-client/converged/v4"
 	prismclientv4 "github.com/nutanix-cloud-native/prism-go-client/v4"
 
@@ -255,7 +256,7 @@ func (n *nutanixManager) nodeExists(ctx context.Context, node *v1.Node) (bool, e
 	}
 	_, err = nClient.GetVM(ctx, vmUUID)
 	if err != nil {
-		if !strings.Contains(fmt.Sprint(err), "VM_NOT_FOUND") {
+		if !converged.IsNotFound(err) {
 			return false, err
 		}
 		return false, nil

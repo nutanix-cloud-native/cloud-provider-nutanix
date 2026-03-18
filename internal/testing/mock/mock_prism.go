@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/nutanix-cloud-native/prism-go-client/converged"
 	clusterModels "github.com/nutanix/ntnx-api-golang-clients/clustermgmt-go-client/v4/models/clustermgmt/v4/config"
 	prismModels "github.com/nutanix/ntnx-api-golang-clients/prism-go-client/v4/models/prism/v4/config"
 	vmmModels "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/vmm/v4/ahv/config"
@@ -32,9 +33,8 @@ type MockPrism struct {
 func (mp *MockPrism) GetVM(ctx context.Context, vmUUID string) (*vmmModels.Vm, error) {
 	if v, ok := mp.mockEnvironment.managedMockMachines[vmUUID]; ok {
 		return v, nil
-	} else {
-		return nil, fmt.Errorf(vmNotFoundError)
 	}
+	return nil, &converged.APIError{Kind: converged.ErrNotFound, Cause: fmt.Errorf("%s", vmNotFoundError)}
 }
 
 func (mp *MockPrism) GetCluster(ctx context.Context, clusterUUID string) (*clusterModels.Cluster, error) {
@@ -54,12 +54,12 @@ func (mp *MockPrism) GetCategory(ctx context.Context, categoryUUID string) (*pri
 	if cat, ok := mp.mockEnvironment.managedMockCategories[categoryUUID]; ok {
 		return cat, nil
 	}
-	return nil, fmt.Errorf(entityNotFoundError)
+	return nil, &converged.APIError{Kind: converged.ErrNotFound, Cause: fmt.Errorf("%s", entityNotFoundError)}
 }
 
 func (mp *MockPrism) GetClusterHost(ctx context.Context, clusterUuid string, hostUUID string) (*clusterModels.Host, error) {
 	if host, ok := mp.mockEnvironment.managedMockHosts[hostUUID]; ok {
 		return host, nil
 	}
-	return nil, fmt.Errorf(entityNotFoundError)
+	return nil, &converged.APIError{Kind: converged.ErrNotFound, Cause: fmt.Errorf("%s", entityNotFoundError)}
 }
