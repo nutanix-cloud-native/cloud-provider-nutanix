@@ -1,2 +1,5 @@
 # False positive, fix is present in v2.16.0 https://github.com/emicklei/go-restful/commit/ac666c045e035603f2704c98c59e979fccbfa94f
 CVE-2022-1996
+# Pending fix in separate dependency PR
+CVE-2026-24051
+CVE-2026-33186
