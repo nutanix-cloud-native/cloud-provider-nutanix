@@ -366,4 +366,22 @@ var _ = Describe("Test Manager", func() { // nolint:typecheck
 			Expect(err).Should(HaveOccurred())
 		})
 	})
+
+	Context("Test NodeExists", func() {
+		It("should return false, nil when VM is not found (NotFound)", func() { // nolint:typecheck
+			node := mockEnvironment.GetNode(mock.MockNodeNameVMNotExisting)
+			Expect(node).ToNot(BeNil())
+			exists, err := m.nodeExists(ctx, node)
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(exists).To(BeFalse())
+		})
+
+		It("should return true, nil when VM exists", func() { // nolint:typecheck
+			node := mockEnvironment.GetNode(mock.MockVMNamePoweredOn)
+			Expect(node).ToNot(BeNil())
+			exists, err := m.nodeExists(ctx, node)
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(exists).To(BeTrue())
+		})
+	})
 })
