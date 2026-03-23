@@ -85,7 +85,7 @@ jobs:
           fail_ci_if_error: true
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@v0.35.0
         env:
           TRIVY_DB_REPOSITORY: "ghcr.io/aquasecurity/trivy-db,public.ecr.aws/aquasecurity/trivy-db"
         with:
@@ -95,6 +95,7 @@ jobs:
           exit-code: "1"
           vuln-type: "os,library"
           severity: "CRITICAL,HIGH"
+          trivyignores: ".trivyignore"
   e2e:
     strategy:
       matrix:
