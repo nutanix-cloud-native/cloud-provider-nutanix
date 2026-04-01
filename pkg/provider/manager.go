@@ -213,6 +213,11 @@ func (n *nutanixManager) addCustomLabelsToNode(ctx context.Context, node *v1.Nod
 		labels[constants.CustomHostNameLabel] = *host.HostName
 	}
 
+	// set the metro node groupName as the node's label
+	if groupName := n.getMetroNodeGroupNameFromVmCustomAttribute(vm); groupName != nil {
+		labels[constants.CustomMetroNodeGroupNameLabel] = *groupName
+	}
+
 	result := helpers.AddOrUpdateLabelsOnNode(n.client, labels, node)
 	if !result {
 		return fmt.Errorf("error occurred while updating labels on node %s", node.Name)
@@ -706,4 +711,20 @@ func (n *nutanixManager) hasPEClusterServiceEnabled(cluster *clusterModels.Clust
 		}
 	}
 	return false
+}
+
+// Return the vm's customAttribute with prefix "metro-node-group-name:"
+func (n *nutanixManager) getMetroNodeGroupNameFromVmCustomAttribute(vm *vmmModels.Vm) *string {
+	if vm.CustomAttributes != nil {
+		for _, attr := range vm.CustomAttributes {
+			if strings.HasPrefix(attr, constants.VmCustomAttributePrefix4MetroNodeGroupNameLabel) {
+				val := strings.TrimSpace(attr[len(constants.VmCustomAttributePrefix4MetroNodeGroupNameLabel):])
+				if val != "" {
+					klog.Infof("Use the node VM's customAttribute %q value to set the node's label %q", attr, constants.CustomMetroNodeGroupNameLabel) //nolint:typecheck
+					return &val
+				}
+			}
+		}
+	}
+	return nil
 }

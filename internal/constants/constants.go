@@ -27,13 +27,15 @@ const (
 	PoweredOffState string = "OFF"
 	PoweredOnState  string = "ON"
 
-	CustomPEUUIDLabel   string = "nutanix.com/prism-element-uuid"
-	CustomPENameLabel   string = "nutanix.com/prism-element-name"
-	CustomHostUUIDLabel string = "nutanix.com/prism-host-uuid"
-	CustomHostNameLabel string = "nutanix.com/prism-host-name"
+	CustomPEUUIDLabel             string = "nutanix.com/prism-element-uuid"
+	CustomPENameLabel             string = "nutanix.com/prism-element-name"
+	CustomHostUUIDLabel           string = "nutanix.com/prism-host-uuid"
+	CustomHostNameLabel           string = "nutanix.com/prism-host-name"
+	CustomMetroNodeGroupNameLabel string = "nutanix.com/metro-node-group-name"
 
 	PrismCentralService string = "PRISM_CENTRAL"
 
-	VmCustomAttributePrefix4ProviderID       = "providerid:"
-	VmCustomAttributePrefix4MetroPreferredPE = "metro-preferred-pe:"
+	VmCustomAttributePrefix4ProviderID              = "providerid:"
+	VmCustomAttributePrefix4MetroPreferredPE        = "metro-preferred-pe:"
+	VmCustomAttributePrefix4MetroNodeGroupNameLabel = "metro-node-group-name:"
 )
