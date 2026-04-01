@@ -23,10 +23,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/nutanix-cloud-native/prism-go-client/converged"
-	convergedV4 "github.com/nutanix-cloud-native/prism-go-client/converged/v4"
-	prismclientv4 "github.com/nutanix-cloud-native/prism-go-client/v4"
-
 	set "github.com/hashicorp/go-set/v3"
 	clusterModels "github.com/nutanix/ntnx-api-golang-clients/clustermgmt-go-client/v4/models/clustermgmt/v4/config"
 	vmmModels "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/vmm/v4/ahv/config"
@@ -41,6 +37,9 @@ import (
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/interfaces"
+	"github.com/nutanix-cloud-native/prism-go-client/converged"
+	convergedV4 "github.com/nutanix-cloud-native/prism-go-client/converged/v4"
+	prismclientv4 "github.com/nutanix-cloud-native/prism-go-client/v4"
 )
 
 type nutanixManager struct {
@@ -135,7 +134,7 @@ func (n *nutanixManager) getInstanceMetadata(ctx context.Context, node *v1.Node)
 	}
 
 	// Generate providerID from VM (checks customAttributes first, then falls back to vmUUID)
-	providerID, err := n.generateProviderIDFromVM(ctx, vm)
+	providerID, err := n.generateProviderIDFromVM(vm)
 	if err != nil {
 		return nil, err
 	}
@@ -181,11 +180,10 @@ func (n *nutanixManager) addCustomLabelsToNode(ctx context.Context, node *v1.Nod
 		return err
 	}
 
-	providerID, err := n.getNutanixProviderIDForNode(ctx, node)
+	vmUUID, err := n.getNutanixInstanceIDForNode(ctx, node)
 	if err != nil {
 		return err
 	}
-	vmUUID := n.stripNutanixIDFromProviderID(providerID)
 	vm, err := nClient.GetVM(ctx, vmUUID)
 	if err != nil {
 		return err
@@ -213,6 +211,11 @@ func (n *nutanixManager) addCustomLabelsToNode(ctx context.Context, node *v1.Nod
 	if host != nil && host.ExtId != nil && host.HostName != nil {
 		labels[constants.CustomHostUUIDLabel] = *host.ExtId
 		labels[constants.CustomHostNameLabel] = *host.HostName
+	}
+
+	// set the metro node groupName as the node's label
+	if groupName := n.getMetroNodeGroupNameFromVmCustomAttribute(vm); groupName != nil {
+		labels[constants.CustomMetroNodeGroupNameLabel] = *groupName
 	}
 
 	result := helpers.AddOrUpdateLabelsOnNode(n.client, labels, node)
@@ -299,52 +302,23 @@ func (n *nutanixManager) getNutanixInstanceIDForNode(ctx context.Context, node *
 	return strings.ToLower(nodeUUID), nil
 }
 
-func (n *nutanixManager) getNutanixProviderIDForNode(ctx context.Context, node *v1.Node) (string, error) {
-	if node == nil {
-		return "", fmt.Errorf("node cannot be nil when fetching providerID")
-	}
-
-	providerID := node.Spec.ProviderID
-	if providerID == "" {
-		vmUUID, err := n.getNutanixInstanceIDForNode(ctx, node)
-		if err != nil {
-			return "", err
-		}
-		providerID, err = n.generateProviderID(ctx, vmUUID)
-		if err != nil {
-			return "", err
-		}
-	}
-	return providerID, nil
-}
-
-func (n *nutanixManager) generateProviderID(ctx context.Context, vmUUID string) (string, error) {
-	if vmUUID == "" {
-		return "", fmt.Errorf("VM UUID cannot be empty when generating nutanix provider ID for node")
-	}
-
-	return fmt.Sprintf("%s://%s", constants.ProviderName, strings.ToLower(vmUUID)), nil
-}
-
 // generateProviderIDFromVM generates the providerID for a node from the VM object.
-// It first checks if the VM's customAttributes field has "providerID:<UUID>".
+// It first checks if the VM's customAttributes field has "providerid:<UUID>".
 // If yes, it uses this UUID value to set the providerID.
 // If not, it falls back to using the vmUUID (backward compatible).
-func (n *nutanixManager) generateProviderIDFromVM(ctx context.Context, vm *vmmModels.Vm) (string, error) {
+func (n *nutanixManager) generateProviderIDFromVM(vm *vmmModels.Vm) (string, error) {
 	if vm == nil {
 		return "", fmt.Errorf("VM cannot be nil when generating nutanix provider ID for node")
 	}
 
-	// Check if customAttributes contains providerID
+	// Use the node VM's customAttribute starts with "providerid:" if it exists
 	if vm.CustomAttributes != nil {
 		for _, attr := range vm.CustomAttributes {
-			// customAttributes are in the format "key:value"
-			parts := strings.SplitN(attr, ":", 2)
-			if len(parts) == 2 && strings.ToLower(strings.TrimSpace(parts[0])) == "providerid" {
-				customProviderID := strings.TrimSpace(parts[1])
-				if customProviderID != "" {
-					klog.V(2).Infof("Using custom providerID from customAttributes: %s", customProviderID) //nolint:typecheck
-					return fmt.Sprintf("%s://%s", constants.ProviderName, customProviderID), nil
+			if strings.HasPrefix(attr, constants.VmCustomAttributePrefix4ProviderID) {
+				provideridVal := strings.TrimSpace(attr[len(constants.VmCustomAttributePrefix4ProviderID):])
+				if provideridVal != "" {
+					klog.Infof("Using the node VM's customAttribute %q value to set the node's spec.providerID", attr) //nolint:typecheck
+					return fmt.Sprintf("%s://%s", constants.ProviderName, provideridVal), nil
 				}
 			}
 		}
@@ -355,7 +329,7 @@ func (n *nutanixManager) generateProviderIDFromVM(ctx context.Context, vm *vmmMo
 		return "", fmt.Errorf("VM ExtId cannot be empty when generating nutanix provider ID for node")
 	}
 
-	klog.V(2).Infof("Using VM ExtId as providerID: %s", *vm.ExtId) //nolint:typecheck
+	klog.Infof("Using VM ExtId %s to set the node's spec.providerID", *vm.ExtId) //nolint:typecheck
 	return fmt.Sprintf("%s://%s", constants.ProviderName, strings.ToLower(*vm.ExtId)), nil
 }
 
@@ -398,7 +372,7 @@ func (n *nutanixManager) getNodeAddresses(_ context.Context, vm *vmmModels.Vm) (
 		}
 
 		var vmAddresses []v1.NodeAddress
-		var err error
+		var err error //nolint:typecheck
 		switch nic.NicNetworkInfo.GetValue().(type) {
 		case vmmModels.VirtualEthernetNicNetworkInfo:
 			netInfo := nic.NicNetworkInfo.GetValue().(vmmModels.VirtualEthernetNicNetworkInfo)
@@ -535,23 +509,44 @@ func (n *nutanixManager) getTopologyInfoUsingPrism(ctx context.Context, nClient 
 		return ti, fmt.Errorf("vm cannot be nil when searching for Prism topology info")
 	}
 
-	if vm.Cluster == nil || vm.Cluster.ExtId == nil || *vm.Cluster.ExtId == "" {
-		return ti, fmt.Errorf("cannot determine Prism zone information for vm %s", *vm.ExtId)
-	}
-
 	pc, err := n.getPrismCentralCluster(ctx, nClient)
 	if err != nil {
 		return ti, err
 	}
+	ti.Region = *pc.Name
 
+	// If the vm's customAttributes has "metro-preferred-pe:" set, use its value for the topology zone
+	if customAttrVal := n.getMetroZoneFromVmCustomAttribute(vm); customAttrVal != nil {
+		ti.Zone = *customAttrVal
+		return ti, nil
+	}
+
+	if vm.Cluster == nil || vm.Cluster.ExtId == nil || *vm.Cluster.ExtId == "" {
+		return ti, fmt.Errorf("cannot determine Prism zone information for vm %s", *vm.ExtId)
+	}
 	cluster, err := nClient.GetCluster(ctx, *vm.Cluster.ExtId)
 	if err != nil {
 		return ti, err
 	}
-
-	ti.Region = *pc.Name
 	ti.Zone = *cluster.Name
+
 	return ti, nil
+}
+
+// Return the vm's customAttribute with prefix "metro-preferred-pe:", use its value for the topology zone
+func (n *nutanixManager) getMetroZoneFromVmCustomAttribute(vm *vmmModels.Vm) *string {
+	if vm.CustomAttributes != nil {
+		for _, attr := range vm.CustomAttributes {
+			if strings.HasPrefix(attr, constants.VmCustomAttributePrefix4MetroPreferredPE) {
+				val := strings.TrimSpace(attr[len(constants.VmCustomAttributePrefix4MetroPreferredPE):])
+				if val != "" {
+					klog.Infof("Using the node VM's customAttribute %q value to set the node's topology zone", attr) //nolint:typecheck
+					return &val
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (n *nutanixManager) getTopologyInfoUsingCategories(ctx context.Context, nutanixClient interfaces.Prism, vm *vmmModels.Vm) (config.TopologyInfo, error) {
@@ -716,4 +711,20 @@ func (n *nutanixManager) hasPEClusterServiceEnabled(cluster *clusterModels.Clust
 		}
 	}
 	return false
+}
+
+// Return the vm's customAttribute with prefix "metro-node-group-name:"
+func (n *nutanixManager) getMetroNodeGroupNameFromVmCustomAttribute(vm *vmmModels.Vm) *string {
+	if vm.CustomAttributes != nil {
+		for _, attr := range vm.CustomAttributes {
+			if strings.HasPrefix(attr, constants.VmCustomAttributePrefix4MetroNodeGroupNameLabel) {
+				val := strings.TrimSpace(attr[len(constants.VmCustomAttributePrefix4MetroNodeGroupNameLabel):])
+				if val != "" {
+					klog.Infof("Use the node VM's customAttribute %q value to set the node's label %q", attr, constants.CustomMetroNodeGroupNameLabel) //nolint:typecheck
+					return &val
+				}
+			}
+		}
+	}
+	return nil
 }

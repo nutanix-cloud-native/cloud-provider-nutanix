@@ -21,13 +21,12 @@ import (
 	"context"
 	"fmt"
 
+	vmmModels "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/vmm/v4/ahv/config"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gstruct"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/fake"
-
-	vmmModels "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/vmm/v4/ahv/config"
 
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/testing/mock"
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
@@ -253,31 +252,16 @@ var _ = Describe("Test Manager", func() { // nolint:typecheck
 		})
 	})
 
-	Context("Test generateProviderID", func() {
-		It("should fail if vmUUID is empty", func() { // nolint:typecheck
-			_, err := m.generateProviderID(ctx, "")
-			Expect(err).Should(HaveOccurred())
-		})
-
-		It("should return providerID in valid format", func() { // nolint:typecheck
-			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
-			Expect(vm).ToNot(BeNil())
-			providerID, err := m.generateProviderID(ctx, *vm.ExtId)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(providerID).To(Equal(fmt.Sprintf("nutanix://%s", *vm.ExtId)))
-		})
-	})
-
 	Context("Test generateProviderIDFromVM", func() {
 		It("should fail if VM is nil", func() { // nolint:typecheck
-			_, err := m.generateProviderIDFromVM(ctx, nil)
+			_, err := m.generateProviderIDFromVM(nil)
 			Expect(err).Should(HaveOccurred())
 		})
 
 		It("should return providerID from VM ExtId when no customAttributes", func() { // nolint:typecheck
 			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
 			Expect(vm).ToNot(BeNil())
-			providerID, err := m.generateProviderIDFromVM(ctx, vm)
+			providerID, err := m.generateProviderIDFromVM(vm)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(providerID).To(Equal(fmt.Sprintf("nutanix://%s", *vm.ExtId)))
 		})
@@ -285,7 +269,7 @@ var _ = Describe("Test Manager", func() { // nolint:typecheck
 		It("should return providerID from customAttributes when present", func() { // nolint:typecheck
 			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameCustomProviderID)
 			Expect(vm).ToNot(BeNil())
-			providerID, err := m.generateProviderIDFromVM(ctx, vm)
+			providerID, err := m.generateProviderIDFromVM(vm)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(providerID).To(Equal(fmt.Sprintf("nutanix://%s", mock.MockCustomProviderID)))
 		})
@@ -294,8 +278,8 @@ var _ = Describe("Test Manager", func() { // nolint:typecheck
 			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
 			Expect(vm).ToNot(BeNil())
 			// Add customAttributes with spaces
-			vm.CustomAttributes = []string{" providerID : test-uuid-with-spaces ", "otherKey:value"}
-			providerID, err := m.generateProviderIDFromVM(ctx, vm)
+			vm.CustomAttributes = []string{"providerid: test-uuid-with-spaces ", "otherKey:value"}
+			providerID, err := m.generateProviderIDFromVM(vm)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(providerID).To(Equal("nutanix://test-uuid-with-spaces"))
 		})
@@ -305,7 +289,7 @@ var _ = Describe("Test Manager", func() { // nolint:typecheck
 			Expect(vm).ToNot(BeNil())
 			// Add customAttributes without providerID
 			vm.CustomAttributes = []string{"someKey:someValue", "anotherKey:anotherValue"}
-			providerID, err := m.generateProviderIDFromVM(ctx, vm)
+			providerID, err := m.generateProviderIDFromVM(vm)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(providerID).To(Equal(fmt.Sprintf("nutanix://%s", *vm.ExtId)))
 		})
@@ -315,7 +299,7 @@ var _ = Describe("Test Manager", func() { // nolint:typecheck
 			Expect(vm).ToNot(BeNil())
 			// Add customAttributes with empty providerID value
 			vm.CustomAttributes = []string{"providerID:", "otherKey:value"}
-			providerID, err := m.generateProviderIDFromVM(ctx, vm)
+			providerID, err := m.generateProviderIDFromVM(vm)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(providerID).To(Equal(fmt.Sprintf("nutanix://%s", *vm.ExtId)))
 		})
@@ -364,6 +348,15 @@ var _ = Describe("Test Manager", func() { // nolint:typecheck
 		It("should fail if vm is empty", func() { // nolint:typecheck
 			_, err := m.getTopologyInfoUsingPrism(ctx, nClient, nil)
 			Expect(err).Should(HaveOccurred())
+		})
+
+		It("should return the custom zone value from the vm's custom ", func() {
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameCustomProviderID)
+			Expect(vm).ToNot(BeNil())
+			zone := m.getMetroZoneFromVmCustomAttribute(vm)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(zone).ToNot(BeNil())
+			Expect(*zone).Should(Equal(mock.MockMetroPreferredPE))
 		})
 	})
 
