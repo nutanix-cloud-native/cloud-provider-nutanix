@@ -7,7 +7,7 @@
     "fping@latest",
     "gnumake@latest",
     "ginkgo@latest",
-    "go@latest",
+    "go@1.25",
     "gotestsum@latest",
     "kind@latest",
     "ko@latest",
