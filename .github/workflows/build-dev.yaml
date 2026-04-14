@@ -96,7 +96,6 @@ jobs:
           exit-code: "1"
           vuln-type: "os,library"
           severity: "CRITICAL,HIGH"
-          trivyignores: ".trivyignore"
   e2e:
     strategy:
       matrix:
