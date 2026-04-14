@@ -32,6 +32,8 @@ import (
 	vmmModels "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/vmm/v4/ahv/config"
 	"go4.org/netipx"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 	cloudprovider "k8s.io/cloud-provider"
@@ -716,4 +718,15 @@ func (n *nutanixManager) hasPEClusterServiceEnabled(cluster *clusterModels.Clust
 		}
 	}
 	return false
+}
+
+func (n *nutanixManager) nodeMatchesSelector(node *v1.Node) (bool, error) {
+	if n.config.NodeSelector == nil {
+		return true, nil
+	}
+	selector, err := metav1.LabelSelectorAsSelector(n.config.NodeSelector)
+	if err != nil {
+		return false, fmt.Errorf("invalid nodeSelector: %v", err)
+	}
+	return selector.Matches(labels.Set(node.Labels)), nil
 }

@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	credentialTypes "github.com/nutanix-cloud-native/prism-go-client/environment/credentials"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	klog "k8s.io/klog/v2"
 )
 
@@ -30,6 +31,8 @@ type Config struct {
 	TopologyDiscovery    TopologyDiscovery                    `json:"topologyDiscovery"`
 	EnableCustomLabeling bool                                 `json:"enableCustomLabeling"`
 	IgnoredNodeIPs       []string                             `json:"ignoredNodeIPs,omitempty"`
+	// NodeSelector restricts which nodes this CCM processes. If nil or empty, all nodes are processed.
+	NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty" yaml:"nodeSelector,omitempty"`
 }
 
 type TopologyDiscovery struct {

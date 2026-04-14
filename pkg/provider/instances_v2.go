@@ -35,6 +35,12 @@ func newInstancesV2(nutanixManager *nutanixManager) cloudprovider.InstancesV2 {
 }
 
 func (i *instancesV2) InstanceExists(ctx context.Context, node *v1.Node) (bool, error) {
+	if matches, err := i.nutanixManager.nodeMatchesSelector(node); err != nil {
+		return false, err
+	} else if !matches {
+		klog.V(4).InfoS("InstanceExists: node not selected, skipping", "node", node.Name) //nolint:typecheck
+		return true, nil
+	}
 	ok, err := i.nutanixManager.nodeExists(ctx, node)
 	if err != nil {
 		return ok, err
@@ -44,6 +50,12 @@ func (i *instancesV2) InstanceExists(ctx context.Context, node *v1.Node) (bool, 
 }
 
 func (i *instancesV2) InstanceShutdown(ctx context.Context, node *v1.Node) (bool, error) {
+	if matches, err := i.nutanixManager.nodeMatchesSelector(node); err != nil {
+		return false, err
+	} else if !matches {
+		klog.V(4).InfoS("InstanceShutdown: node not selected, skipping", "node", node.Name) //nolint:typecheck
+		return false, nil
+	}
 	ok, err := i.nutanixManager.isNodeShutdown(ctx, node)
 	if err != nil {
 		return ok, err
@@ -53,6 +65,12 @@ func (i *instancesV2) InstanceShutdown(ctx context.Context, node *v1.Node) (bool
 }
 
 func (i *instancesV2) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloudprovider.InstanceMetadata, error) {
+	if matches, err := i.nutanixManager.nodeMatchesSelector(node); err != nil {
+		return nil, err
+	} else if !matches {
+		klog.V(4).InfoS("InstanceMetadata: node not selected, skipping", "node", node.Name) //nolint:typecheck
+		return &cloudprovider.InstanceMetadata{ProviderID: node.Spec.ProviderID}, nil
+	}
 	md, err := i.nutanixManager.getInstanceMetadata(ctx, node)
 	if err != nil {
 		return md, err

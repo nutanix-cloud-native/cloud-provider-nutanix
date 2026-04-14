@@ -10,7 +10,10 @@ import (
 	vmmModels "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/vmm/v4/ahv/config"
 	"go4.org/netipx"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
 )
 
 func TestIsNodeAddressesSet(t *testing.T) {
@@ -297,5 +300,103 @@ func vmWithNICS(t *testing.T, name, uuid string, nics []vmmModels.Nic) *vmmModel
 		ExtId: ptr.To(uuid),
 		Name:  ptr.To(name),
 		Nics:  nics,
+	}
+}
+
+func TestNodeMatchesSelector(t *testing.T) {
+	tests := []struct {
+		name         string
+		nodeLabels   map[string]string
+		nodeSelector *metav1.LabelSelector
+		want         bool
+		wantErr      bool
+	}{
+		{
+			name:         "nil selector matches all nodes",
+			nodeLabels:   map[string]string{"foo": "bar"},
+			nodeSelector: nil,
+			want:         true,
+		},
+		{
+			name:       "matchLabels: node matches",
+			nodeLabels: map[string]string{"role": "worker"},
+			nodeSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"role": "worker"},
+			},
+			want: true,
+		},
+		{
+			name:       "matchLabels: node does not match",
+			nodeLabels: map[string]string{"role": "control-plane"},
+			nodeSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"role": "worker"},
+			},
+			want: false,
+		},
+		{
+			name:       "matchExpressions In: node matches",
+			nodeLabels: map[string]string{"zone": "us-east-1a"},
+			nodeSelector: &metav1.LabelSelector{
+				MatchExpressions: []metav1.LabelSelectorRequirement{{
+					Key:      "zone",
+					Operator: metav1.LabelSelectorOpIn,
+					Values:   []string{"us-east-1a", "us-east-1b"},
+				}},
+			},
+			want: true,
+		},
+		{
+			name:       "matchExpressions NotIn: node is excluded",
+			nodeLabels: map[string]string{"zone": "us-east-1a"},
+			nodeSelector: &metav1.LabelSelector{
+				MatchExpressions: []metav1.LabelSelectorRequirement{{
+					Key:      "zone",
+					Operator: metav1.LabelSelectorOpNotIn,
+					Values:   []string{"us-east-1a"},
+				}},
+			},
+			want: false,
+		},
+		{
+			name:       "matchExpressions NotIn: node without the label matches",
+			nodeLabels: map[string]string{},
+			nodeSelector: &metav1.LabelSelector{
+				MatchExpressions: []metav1.LabelSelectorRequirement{{
+					Key:      "zone",
+					Operator: metav1.LabelSelectorOpNotIn,
+					Values:   []string{"us-east-1a"},
+				}},
+			},
+			want: true,
+		},
+		{
+			name:       "matchLabels + matchExpressions NotIn: both must hold",
+			nodeLabels: map[string]string{"role": "worker", "zone": "us-east-1a"},
+			nodeSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"role": "worker"},
+				MatchExpressions: []metav1.LabelSelectorRequirement{{
+					Key:      "zone",
+					Operator: metav1.LabelSelectorOpNotIn,
+					Values:   []string{"us-east-1a"},
+				}},
+			},
+			want: false, // NotIn fails even though matchLabels passes
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &nutanixManager{
+				config: config.Config{NodeSelector: tt.nodeSelector},
+			}
+			node := &v1.Node{}
+			node.Labels = tt.nodeLabels
+			got, err := m.nodeMatchesSelector(node)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("nodeMatchesSelector() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("nodeMatchesSelector() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
