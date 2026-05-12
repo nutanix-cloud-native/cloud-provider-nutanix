@@ -9,8 +9,8 @@ require (
 	github.com/onsi/gomega v1.38.2
 	k8s.io/api v0.34.1
 	k8s.io/apimachinery v0.34.1
-	sigs.k8s.io/cluster-api v1.11.2
-	sigs.k8s.io/cluster-api/test v1.11.2
+	sigs.k8s.io/cluster-api v1.13.1
+	sigs.k8s.io/cluster-api/test v1.13.1
 	sigs.k8s.io/controller-runtime v0.22.3
 )
 
