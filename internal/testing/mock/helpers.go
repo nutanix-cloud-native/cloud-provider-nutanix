@@ -23,7 +23,7 @@ import (
 
 	credentialTypes "github.com/nutanix-cloud-native/prism-go-client/environment/credentials"
 
-	. "github.com/onsi/gomega"
+	. "github.com/onsi/gomega" //nolint:staticcheck
 	"github.com/onsi/gomega/gstruct"
 
 	clusterModels "github.com/nutanix/ntnx-api-golang-clients/clustermgmt-go-client/v4/models/clustermgmt/v4/config"

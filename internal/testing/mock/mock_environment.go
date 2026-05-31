@@ -24,7 +24,7 @@ import (
 	prismModels "github.com/nutanix/ntnx-api-golang-clients/prism-go-client/v4/models/prism/v4/config"
 	vmmCommonModels "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/common/v1/config"
 	vmmModels "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/vmm/v4/ahv/config"
-	. "github.com/onsi/gomega"
+	. "github.com/onsi/gomega" //nolint:staticcheck
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
@@ -133,7 +133,9 @@ func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockE
 			Value: ptr.To(ip),
 		}
 		nicNetInfo.Ipv4Info = vmmModels.NewIpv4Info()
-		nic.SetNicNetworkInfo(*nicNetInfo)
+		if err := nic.SetNicNetworkInfo(*nicNetInfo); err != nil {
+			return nil, err
+		}
 		filteredNics = append(filteredNics, *nic)
 	}
 	filteredAddressesVM.Nics = filteredNics

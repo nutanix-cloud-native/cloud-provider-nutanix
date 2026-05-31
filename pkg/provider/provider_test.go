@@ -57,7 +57,7 @@ var _ = Describe("Test Provider", func() { //nolint:typecheck
 			},
 			instancesV2: &instancesV2{},
 		}
-		os.Setenv(constants.CCMNamespaceKey, "ccm-namespace")
+		Expect(os.Setenv(constants.CCMNamespaceKey, "ccm-namespace")).To(Succeed())
 	})
 
 	Context("Test AddKubernetesClient", func() {
