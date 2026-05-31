@@ -16,7 +16,7 @@ GOTESTPKGS = $(shell go list ./... | grep -v /internal | grep -v /test)
 
 .PHONY: build
 build: ## Build the project binary
-	go build -ldflags="-w -s -X 'main.version=${VERSION}'" -o=bin/nutanix-cloud-controller-manager .
+	CGO_ENABLED=0 go build -ldflags="-w -s -X 'main.version=${VERSION}'" -o=bin/nutanix-cloud-controller-manager .
 
 ## --------------------------------------
 ## Lint
@@ -56,7 +56,7 @@ docker-push: ## Build and push the image to the registry
 
 .PHONY: unit-test
 unit-test: ## Run the unit tests of the project
-	go test -v  $(GOTESTPKGS)
+	CGO_ENABLED=0 go test -v  $(GOTESTPKGS)
 
 .PHONY: unit-test-html
 unit-test-html: unit-test ## Run the unit tests of the project and export the coverage
@@ -64,7 +64,7 @@ unit-test-html: unit-test ## Run the unit tests of the project and export the co
 
 .PHONY: coverage
 coverage: ## Run the tests of the project and export the coverage
-	go test -cover -covermode=count -coverprofile=profile.cov  $(GOTESTPKGS)
+	CGO_ENABLED=0 go test -cover -covermode=count -coverprofile=profile.cov  $(GOTESTPKGS)
 	go tool cover -func profile.cov
 ifeq ($(EXPORT_RESULT), true)
 	gocov convert profile.cov | gocov-xml > coverage.xml
