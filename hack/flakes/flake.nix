@@ -10,9 +10,9 @@
     flake-utils.lib.eachDefaultSystem (system:
       with nixpkgs.legacyPackages.${system}; rec {
         packages = rec {
-          golangci-lint = pkgs.golangci-lint.override { buildGoModule = buildGo121Module; };
+          golangci-lint = pkgs.golangci-lint;
 
-          go-mod-upgrade = buildGo121Module {
+          go-mod-upgrade = buildGoModule {
             name = "go-mod-upgrade";
             src = fetchFromGitHub {
               owner = "oligot";
@@ -25,7 +25,7 @@
             vendorHash = "sha256-8rbRxtOiKmnf68kjsUCXaZf+MHI1n5aXa91Aneq9SKo=";
           };
 
-          go-junit-report = buildGo121Module {
+          go-junit-report = buildGoModule {
             name = "go-junit-report";
             src = fetchFromGitHub {
               owner = "jstemmer";
@@ -43,7 +43,7 @@
             };
 			    };
 
-          gocov = buildGo121Module {
+          gocov = buildGoModule {
             name = "gocov";
             src = fetchFromGitHub {
               owner = "axw";
@@ -51,7 +51,7 @@
               rev = "v1.0.0";
               sha256 = "14dsbabp1h31zzx7xlzg604spk3k3a0wpyq9xsrpqr8hz425h9xv";
             };
-            vendorSha256 = "1hkfj18sshn8z0w1njgrwzchagxz1fmpq26a1wsf47xd64ydzwi1";
+            vendorHash = "sha256-IfLfPDGtH+I0D8oIfKsLvz8F2ef5SRs4+MhCrVGQbsI=";
             meta = with lib; {
               description = "Coverage testing tool for The Go Programming Language.";
               longDescription = ''
@@ -65,7 +65,7 @@
             };
           };
 
-          gocov-xml = buildGo121Module {
+          gocov-xml = buildGoModule {
             name = "gocov-xml";
             src = fetchFromGitHub {
               owner = "AlekSi";
@@ -73,10 +73,10 @@
               rev = "v1.1.0";
               sha256 = "936xrDmxciVr1KpfzzpsztU0XvQGG4fv4v4K2HHSN/A=";
             };
-            vendorSha256 = "80fPJXEVj7szTFxxxf5MhWE6Zbll7/SDcdisfZdrOlQ=";
+            vendorHash = "sha256-80fPJXEVj7szTFxxxf5MhWE6Zbll7/SDcdisfZdrOlQ=";
           };
 
-          setup-envtest = buildGo121Module {
+          setup-envtest = buildGoModule {
             name = "setup-envtest";
             src = fetchFromGitHub {
               owner = "kubernetes-sigs";

@@ -231,7 +231,7 @@ var _ = Describe("Test InstancesV2", func() { // nolint:typecheck
 			Expect(err).ToNot(HaveOccurred())
 			_, err = i.InstanceMetadata(ctx, node)
 			Expect(err).ShouldNot(HaveOccurred())
-			updatedNode, err := kClient.CoreV1().Nodes().Get(ctx, node.ObjectMeta.Name, metav1.GetOptions{})
+			updatedNode, err := kClient.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
 			Expect(err).ToNot(HaveOccurred())
 			mock.CheckAdditionalLabels(updatedNode, vm, cluster, host)
 		})
@@ -243,7 +243,7 @@ var _ = Describe("Test InstancesV2", func() { // nolint:typecheck
 			// PoweredOff VMs don't have host reference
 			_, err := i.InstanceMetadata(ctx, node)
 			Expect(err).ShouldNot(HaveOccurred())
-			updatedNode, err := kClient.CoreV1().Nodes().Get(ctx, node.ObjectMeta.Name, metav1.GetOptions{})
+			updatedNode, err := kClient.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
 			Expect(err).ToNot(HaveOccurred())
 			mock.CheckAdditionalLabels(updatedNode, vm, cluster, nil)
 		})
@@ -254,7 +254,7 @@ var _ = Describe("Test InstancesV2", func() { // nolint:typecheck
 			i.nutanixManager.config.EnableCustomLabeling = false
 			_, err = i.InstanceMetadata(ctx, node)
 			Expect(err).ShouldNot(HaveOccurred())
-			updatedNode, err := kClient.CoreV1().Nodes().Get(ctx, node.ObjectMeta.Name, metav1.GetOptions{})
+			updatedNode, err := kClient.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(updatedNode.Labels).To(BeEmpty())
 		})

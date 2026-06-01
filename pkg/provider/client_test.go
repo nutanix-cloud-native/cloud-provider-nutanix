@@ -35,6 +35,10 @@ import (
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
 )
 
+func unsetEnv(key string) {
+	Expect(os.Unsetenv(key)).To(Succeed()) //nolint:typecheck
+}
+
 var _ = Describe("Test Client", func() { // nolint:typecheck
 	var (
 		kClient         *fake.Clientset
@@ -85,7 +89,7 @@ var _ = Describe("Test Client", func() { // nolint:typecheck
 		It("should return the management endpoint", func() { //nolint:typecheck
 			p := local.NewProvider()
 			err := os.Setenv("NUTANIX_ENDPOINT", "prism.nutanix.com")
-			defer os.Unsetenv("NUTANIX_ENDPOINT")
+			defer unsetEnv("NUTANIX_ENDPOINT")
 			Expect(err).To(BeNil()) //nolint:typecheck
 			nClient.env = p
 			Expect(nClient.ManagementEndpoint()).ToNot(BeZero()) //nolint:typecheck
@@ -109,7 +113,7 @@ var _ = Describe("Test Client", func() { // nolint:typecheck
 			p := local.NewProvider()
 			err := os.Setenv("NUTANIX_ENDPOINT", "prism.nutanix.com")
 			Expect(err).To(BeNil())
-			defer os.Unsetenv("NUTANIX_ENDPOINT")
+			defer unsetEnv("NUTANIX_ENDPOINT")
 			nClient.env = p
 			client, err := nClient.Get()
 			Expect(err).ToNot(BeNil())
@@ -120,7 +124,7 @@ var _ = Describe("Test Client", func() { // nolint:typecheck
 			p := local.NewProvider()
 			err := os.Setenv("NUTANIX_ENDPOINT", "prism.nutanix.com")
 			Expect(err).To(BeNil())
-			defer os.Unsetenv("NUTANIX_ENDPOINT")
+			defer unsetEnv("NUTANIX_ENDPOINT")
 			nClient.env = p
 			nClient.clientCache = convergedV4.NewClientCache(prismclientv4.WithSessionAuth(false))
 			client, err := nClient.Get()
@@ -132,15 +136,15 @@ var _ = Describe("Test Client", func() { // nolint:typecheck
 			p := local.NewProvider()
 			err := os.Setenv("NUTANIX_ENDPOINT", "prism.nutanix.com")
 			Expect(err).To(BeNil())
-			defer os.Unsetenv("NUTANIX_ENDPOINT")
+			defer unsetEnv("NUTANIX_ENDPOINT")
 
 			err = os.Setenv("NUTANIX_USERNAME", "username")
 			Expect(err).To(BeNil())
-			defer os.Unsetenv("NUTANIX_USERNAME")
+			defer unsetEnv("NUTANIX_USERNAME")
 
 			err = os.Setenv("NUTANIX_PASSWORD", "password")
 			Expect(err).To(BeNil())
-			defer os.Unsetenv("NUTANIX_PASSWORD")
+			defer unsetEnv("NUTANIX_PASSWORD")
 
 			nClient.env = p
 			nClient.clientCache = convergedV4.NewClientCache(prismclientv4.WithSessionAuth(false))
@@ -159,7 +163,7 @@ var _ = Describe("Test Client", func() { // nolint:typecheck
 		It("should return error if CCM namespace is not set", func() { // nolint:typecheck
 			err := os.Setenv(constants.CCMNamespaceKey, "")
 			Expect(err).To(BeNil())
-			defer os.Unsetenv(constants.CCMNamespaceKey)
+			defer unsetEnv(constants.CCMNamespaceKey)
 
 			Expect(nClient.setupEnvironment()).ToNot(BeNil())
 		})
@@ -167,7 +171,7 @@ var _ = Describe("Test Client", func() { // nolint:typecheck
 		It("should set the namespace for credential ref if not set", func() { // nolint:typecheck
 			err := os.Setenv(constants.CCMNamespaceKey, "kube-system")
 			Expect(err).To(BeNil())
-			defer os.Unsetenv(constants.CCMNamespaceKey)
+			defer unsetEnv(constants.CCMNamespaceKey)
 
 			nClient.config.PrismCentral.CredentialRef.Namespace = ""
 			defer func() {
@@ -182,7 +186,7 @@ var _ = Describe("Test Client", func() { // nolint:typecheck
 		It("should set the namespace for additional trust bundle if not set", func() { // nolint:typecheck
 			err := os.Setenv(constants.CCMNamespaceKey, "kube-system")
 			Expect(err).To(BeNil())
-			defer os.Unsetenv(constants.CCMNamespaceKey)
+			defer unsetEnv(constants.CCMNamespaceKey)
 
 			nClient.config = mock.GenerateMockConfig()
 			nClient.config.PrismCentral.AdditionalTrustBundle = &credentials.NutanixTrustBundleReference{
