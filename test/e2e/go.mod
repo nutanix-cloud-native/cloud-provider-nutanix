@@ -2,6 +2,8 @@ module github.com/nutanix-cloud-native/cloud-provider-nutanix/test/e2e
 
 go 1.25.0
 
+toolchain go1.26.4
+
 require (
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
