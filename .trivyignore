@@ -1,2 +1,8 @@
 # False positive, fix is present in v2.16.0 https://github.com/emicklei/go-restful/commit/ac666c045e035603f2704c98c59e979fccbfa94f
 CVE-2022-1996
+
+# Not applicable: test-only transitive dependency (sigs.k8s.io/cluster-api/test -> github.com/docker/docker)
+# in test/e2e; not part of the shipped CCM binary/image. Exploitation requires Docker AuthZ
+# plugins (https://github.com/moby/moby/security/advisories/GHSA-x744-4wpc-v9h2), which the e2e
+# harness does not use. Fixed only in docker 29.3.1, which has no resolvable Go module tag yet.
+CVE-2026-34040
