@@ -155,3 +155,11 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.2 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
+
+replace github.com/go-jose/go-jose/v4 => github.com/go-jose/go-jose/v4 v4.1.4
+
+replace go.mongodb.org/mongo-driver => go.mongodb.org/mongo-driver v1.17.9
+
+replace github.com/moby/spdystream => github.com/moby/spdystream v0.5.1
+
+replace github.com/yuin/goldmark => github.com/yuin/goldmark v1.8.2
