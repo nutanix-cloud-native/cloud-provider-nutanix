@@ -1,2 +1,6 @@
 # False positive, fix is present in v2.16.0 https://github.com/emicklei/go-restful/commit/ac666c045e035603f2704c98c59e979fccbfa94f
 CVE-2022-1996
+
+# Trivy reports fixed version 29.3.1 for github.com/docker/docker, but no such Go module tag exists.
+# Keep this temporary until an upstream module version with the fix is published and consumable.
+CVE-2026-34040
