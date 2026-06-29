@@ -6,6 +6,11 @@ PLATFORMS ?= linux/amd64,linux/arm64,linux/arm
 
 EXPORT_RESULT?=false # for CI please set EXPORT_RESULT to true
 
+# Auto-select credential type from API key on every make invocation.
+export NUTANIX_CREDENTIALS_TYPE = $(if $(strip $(NUTANIX_API_KEY)),api_key,basic_auth)
+NUTANIX_CREDENTIALS_OVERLAY ?= $(subst _,-,$(NUTANIX_CREDENTIALS_TYPE))
+export NUTANIX_CREDENTIALS_OVERLAY
+
 GOTESTPKGS = $(shell go list ./... | grep -v /internal | grep -v /test)
 
 ##@ Development
@@ -122,8 +127,10 @@ include ./openshift/openshift.mk
 
 .PHONY: deployment-manifests
 deployment-manifests: ## Generate the deployment manifests
-	mkdir -p $(ARTIFACTS)/manifests
-	cat manifests/*.yaml | envsubst > $(ARTIFACTS)/manifests/deploy_ccm.yaml
+	echo "Setting NUTANIX_CREDENTIALS_TYPE: $(NUTANIX_CREDENTIALS_TYPE)"; \
+	echo "Using manifest overlay: $(NUTANIX_CREDENTIALS_OVERLAY)"; \
+	mkdir -p $(ARTIFACTS)/manifests; \
+	kubectl kustomize overlays/manifests/$(NUTANIX_CREDENTIALS_OVERLAY) | envsubst > $(ARTIFACTS)/manifests/deploy_ccm.yaml
 
 .PHONY: deploy
 deploy: deployment-manifests ## Deploy the Nutanix Cloud Controller Manager to the cluster

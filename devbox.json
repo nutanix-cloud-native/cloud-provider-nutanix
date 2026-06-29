@@ -8,6 +8,7 @@
     "gnumake@latest",
     "ginkgo@latest",
     "go@latest",
+    "git@latest",
     "gotestsum@latest",
     "kind@latest",
     "ko@latest",

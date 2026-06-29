@@ -56,6 +56,8 @@ jobs:
       - name: Test build
         run: devbox run -- make test-e2e LABEL_FILTERS='${{ inputs.e2e-labels }}'
         env:
+          NUTANIX_CREDENTIALS_TYPE: ${{ secrets.NUTANIX_API_KEY != '' && 'api_key' || 'basic_auth' }}
+          NUTANIX_API_KEY: ${{ secrets.NUTANIX_API_KEY }}
           NUTANIX_USER: ${{ secrets.NUTANIX_USER }}
           NUTANIX_PASSWORD: ${{ secrets.NUTANIX_PASSWORD }}
           NUTANIX_ENDPOINT: ${{ secrets.NUTANIX_ENDPOINT }}
