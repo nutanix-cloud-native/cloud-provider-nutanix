@@ -15,7 +15,7 @@ jobs:
       security-events: write
     name: Scan
     runs-on:
-      - self-hosted-nutanix-docker-medium
+      - self-hosted-nutanix-docker-small
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4

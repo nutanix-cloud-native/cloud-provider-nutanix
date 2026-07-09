@@ -16,7 +16,7 @@ jobs:
   security:
     if: github.repository == 'nutanix-cloud-native/cloud-provider-nutanix'
     runs-on:
-      - self-hosted-nutanix-docker-medium
+      - self-hosted-nutanix-docker-small
     permissions:
       pull-requests: write
     steps:
