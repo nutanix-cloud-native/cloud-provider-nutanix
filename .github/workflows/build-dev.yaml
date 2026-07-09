@@ -52,7 +52,7 @@ jobs:
       - name: Install devbox
         uses: jetify-com/devbox-install-action@v0.14.0
         with:
-          enable-cache: "true"
+          enable-cache: "false"
 
       - uses: actions/cache@v4
         with:
