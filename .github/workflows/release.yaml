@@ -68,21 +68,30 @@ jobs:
           echo "|-|-|" >> ${{ github.workspace }}-CHANGELOG.txt
           echo "|Nutanix Cloud Provider|[$NEW_IMG]($NEW_IMG)|" >> ${{ github.workspace }}-CHANGELOG.txt
 
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: false
-          prerelease: false
-          body_path: ${{ github.workspace }}-CHANGELOG.txt
-          generate_release_notes: true
-          append_body: true
-
       - name: Set up Helm
         uses: azure/setup-helm@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Set up chart-testing
+        uses: helm/chart-testing-action@v2.7.0
+
+      - name: Lint chart
+        run: |
+          ct lint --charts charts/nutanix-cloud-provider \
+            --check-version-increment=false \
+            --validate-maintainers=false
 
       - name: Package and push Helm chart to GHCR
         env:
           CHART_DIR: charts/nutanix-cloud-provider
+          # Destination OCI repo. Override with the HELM_OCI_REPO repo/org
+          # variable (e.g. in the internal fork) to avoid clobbering the chart
+          # published from this repo; defaults to the canonical path.
+          HELM_OCI_REPO: ${{ vars.HELM_OCI_REPO || 'ghcr.io/nutanix-cloud-native/chart' }}
         run: |
           # Chart version tracks the CCM release tag (semver, no leading "v");
           # appVersion keeps the "v" prefix so it matches the published image tag.
@@ -94,4 +103,13 @@ jobs:
             --version "$VERSION" \
             --app-version "$GITHUB_REF_NAME" \
             --destination .cr-release-packages
-          helm push .cr-release-packages/*.tgz oci://ghcr.io/${{ github.repository_owner }}/chart
+          helm push .cr-release-packages/*.tgz "oci://${HELM_OCI_REPO}"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
+          body_path: ${{ github.workspace }}-CHANGELOG.txt
+          generate_release_notes: true
+          append_body: true
