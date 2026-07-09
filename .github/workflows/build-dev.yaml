@@ -70,10 +70,12 @@ jobs:
       - name: Run unit tests
         run: devbox run -- make unit-test
 
-      # gocov-xml expects things to be properly placed under go path.
-      # GHA clones into /home/runner/work/repository so we create
-      # the directory under the right path and link it
-      - run: mkdir -p /home/runner/go/src/github.com/nutanix-cloud-native/ && ln -s /home/runner/work/cloud-provider-nutanix/cloud-provider-nutanix /home/runner/go/src/github.com/nutanix-cloud-native
+      # gocov-xml resolves the package via GOPATH, so link the checked-out
+      # workspace under $GOPATH/src. Use $GITHUB_WORKSPACE because the runner
+      # work dir differs across runners (e.g. work vs _work).
+      - run: |
+          mkdir -p /home/runner/go/src/github.com/nutanix-cloud-native
+          ln -sfn "$GITHUB_WORKSPACE" /home/runner/go/src/github.com/nutanix-cloud-native/cloud-provider-nutanix
 
       - name: Run coverage report
         run: devbox run -- make coverage
