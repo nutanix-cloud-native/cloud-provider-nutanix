@@ -14,7 +14,8 @@ jobs:
       contents: read
       security-events: write
     name: Scan
-    runs-on: "ubuntu-latest"
+    runs-on:
+      - self-hosted-nutanix-docker-medium
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
