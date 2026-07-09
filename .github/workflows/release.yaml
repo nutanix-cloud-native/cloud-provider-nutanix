@@ -9,6 +9,9 @@ jobs:
   build_release:
     name: Build Release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -73,3 +76,22 @@ jobs:
           body_path: ${{ github.workspace }}-CHANGELOG.txt
           generate_release_notes: true
           append_body: true
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Package and push Helm chart to GHCR
+        env:
+          CHART_DIR: charts/nutanix-cloud-provider
+        run: |
+          # Chart version tracks the CCM release tag (semver, no leading "v");
+          # appVersion keeps the "v" prefix so it matches the published image tag.
+          VERSION="${GITHUB_REF_NAME#v}"
+          helm registry login ghcr.io \
+            --username "${{ github.actor }}" \
+            --password "${{ secrets.GITHUB_TOKEN }}"
+          helm package "$CHART_DIR" \
+            --version "$VERSION" \
+            --app-version "$GITHUB_REF_NAME" \
+            --destination .cr-release-packages
+          helm push .cr-release-packages/*.tgz oci://ghcr.io/${{ github.repository_owner }}/chart

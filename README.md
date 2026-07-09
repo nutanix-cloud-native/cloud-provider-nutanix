@@ -2,6 +2,25 @@
 
 This repository contains the Kubernetes cloud-controller-manager for Nutanix AHV.
 
+## Installation
+
+**Note**: Requires a Kubernetes cluster that is configured for an external CCM.
+
+The CCM is published as a Helm chart (OCI artifact) to GitHub Container Registry (GHCR).
+To install it into the `kube-system` namespace:
+
+```console
+helm install nutanix-ccm oci://ghcr.io/nutanix-cloud-native/chart/nutanix-cloud-provider \
+  --version <version> -n kube-system \
+  --set prismCentralEndPoint=<PC IP/FQDN> \
+  --set prismCentralInsecure=<true|false> \
+  --set username=<PC username> \
+  --set password=<PC password>
+```
+
+See the [chart README](charts/nutanix-cloud-provider/README.md) for the full list of
+configurable values and additional examples.
+
 ## Developer Workflow
 
 ### Build the image
