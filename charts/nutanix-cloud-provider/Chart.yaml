@@ -8,7 +8,7 @@ apiVersion: v2
 # version and appVersion are placeholders for local development/linting only.
 # They are overwritten at release time from the git tag by
 # .github/workflows/release.yaml (helm package --version/--app-version).
-appVersion: 0.0.0
+appVersion: v0.0.0
 version: 0.0.0
 description: Nutanix Cloud Provider
 home: https://github.com/nutanix-cloud-native/cloud-provider-nutanix

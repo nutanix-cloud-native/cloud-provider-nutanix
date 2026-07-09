@@ -16,8 +16,8 @@ configName: nutanix-config
 prismCentralEndPoint: ""
 prismCentralPort: 9440
 prismCentralInsecure: false
+# Base64-encoded CA bundle content for Prism Central trust (used as ConfigMap binaryData.ca.crt).
 prismCentralAdditionalTrustBundle: ""
-
 # if set to true a new secret will not be created if not secretname will be used
 createSecret: true
 secretName: nutanix-creds
@@ -42,7 +42,7 @@ topologyDiscovery:
   #  Categories: read categories to set Region and Zone
   type: Prism
 
-# If topologyDiscovery.type set to Categories define the name of categories to read for each toplogy
+# If topologyDiscovery.type set to Categories define the name of categories to read for each topology
 # ( precedence order is VM -> PE -> PC )
 
 topologyCategories:

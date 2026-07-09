@@ -33,7 +33,7 @@ To install the chart with the name `nutanix-ccm`:
 
 ```console
 helm install nutanix-ccm oci://ghcr.io/nutanix-cloud-native/chart/nutanix-cloud-provider \
-  --version <version> -n <namespace of your choice>
+  --version <chart version (e.g. 0.6.5)> -n <namespace of your choice>
 ```
 
 
@@ -44,7 +44,7 @@ Upgrades can be done using the normal Helm upgrade mechanism
 
 ```console
 helm upgrade nutanix-ccm oci://ghcr.io/nutanix-cloud-native/chart/nutanix-cloud-provider \
-  --version <version> -n <namespace of your choice>
+  --version <chart version (e.g. 0.6.5)> -n <namespace of your choice>
 ```
 
 
@@ -68,7 +68,7 @@ The following table lists the configurable parameters of the Nutanix Cloud Provi
 | `prismCentralEndPoint`              | Hostname or IP to connect to Prism Central instance              | ``                                                               |
 | `prismCentralPort`                  | Port to connect to Prism Central instance                        | `9440`                                                           |
 | `prismCentralInsecure`              | Allow insecure server connections to Prism Central instance      | `false`                                                          |
-| `prismCentralAdditionalTrustBundle` | Additional Trust Bundle to connect to Prism Central instance     | ``                                                               |
+| `prismCentralAdditionalTrustBundle` | Base64-encoded CA bundle (PEM) for Prism Central trust           | ``                                                               |
 | `createSecret`                      | Create secret for Nutanix Cloud Provider (if false use existing) | `true`                                                           |
 | `secretName`                        | Name of the secret for Nutanix Cloud Provider credentials        | `nutanix-creds`                                                  |
 | `username`                          | Username to connect to Prism Central instance                    | `admin`                                                          |

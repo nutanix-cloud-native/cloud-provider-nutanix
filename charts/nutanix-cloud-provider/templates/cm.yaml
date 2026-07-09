@@ -8,32 +8,32 @@ data:
   nutanix_config.json: |-
     {
       "prismCentral": {
-        "address": "{{ .Values.prismCentralEndPoint}}",
+        "address": {{ .Values.prismCentralEndPoint | toJson }},
         "port": {{ .Values.prismCentralPort }},
         "insecure": {{ .Values.prismCentralInsecure }},
         "credentialRef": {
           "kind": "secret",
-          "name": "{{ .Values.secretName }}",
-          "namespace": "{{ .Release.Namespace }}"
+          "name": {{ .Values.secretName | toJson }},
+          "namespace": {{ .Release.Namespace | toJson }}
         },
         "additionalTrustBundle": {
           "kind": "ConfigMap",
           "name": "user-ca-bundle",
-          "namespace": "{{ .Release.Namespace }}"
+          "namespace": {{ .Release.Namespace | toJson }}
         }
 
       },
       "enableCustomLabeling": {{ .Values.enableCustomLabeling }},
 {{- with .Values.ignoredNodeIPs }}
-      "ignoredNodeIPs": [ {{ range $idx, $ip := . }}{{ if $idx }}, {{ end }}"{{ . }}"{{ end }} ],
+      "ignoredNodeIPs": [ {{ range $idx, $ip := . }}{{ if $idx }}, {{ end }}{{ $ip | toJson }}{{ end }} ],
 {{- end }}
 
 {{- if eq .Values.topologyDiscovery.type "Categories" }}
       "topologyDiscovery": {
         "type": "Categories",
         "topologyCategories": {
-          "regionCategory": "{{ .Values.topologyCategories.region }}",
-          "zoneCategory": "{{ .Values.topologyCategories.zone }}"
+          "regionCategory": {{ .Values.topologyCategories.region | toJson }},
+          "zoneCategory": {{ .Values.topologyCategories.zone | toJson }}
         }
 {{- else }}
       "topologyDiscovery": {

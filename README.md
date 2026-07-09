@@ -11,7 +11,7 @@ To install it into the `kube-system` namespace:
 
 ```console
 helm install nutanix-ccm oci://ghcr.io/nutanix-cloud-native/chart/nutanix-cloud-provider \
-  --version <version> -n kube-system \
+  --version <chart version (e.g. 0.6.5)> -n kube-system \
   --set prismCentralEndPoint=<PC IP/FQDN> \
   --set prismCentralInsecure=<true|false> \
   --set username=<PC username> \

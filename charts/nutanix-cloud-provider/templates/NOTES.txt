@@ -1,2 +1,1 @@
-
 Nutanix Cloud Provider {{ .Chart.AppVersion }} was deployed in namespace {{ .Release.Namespace }}
