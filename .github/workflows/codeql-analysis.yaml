@@ -4,13 +4,36 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    branches: [main]
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled]
     branches: [main]
   schedule:
     - cron: "30 1 * * 0"
 
 jobs:
+  check_approvals:
+    runs-on:
+      - self-hosted-nutanix-docker-small
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
+    outputs:
+      check_approvals: ${{ github.event_name == 'pull_request_target' && steps.check_approvals.outputs.check_approvals || 'true' }}
+      external_pr: ${{ github.event.pull_request.base.repo.clone_url != github.event.pull_request.head.repo.clone_url }}
+    steps:
+      - name: Check approval status
+        if: ${{ github.event_name == 'pull_request_target' }}
+        id: check_approvals
+        uses: nutanix-cloud-native/action-check-approvals@v1
+
   CodeQL-Build:
-    runs-on: ubuntu-latest
+    if: ${{ always() &&
+      (github.event_name == 'push' || github.event_name == 'schedule' ||
+      (github.event_name == 'pull_request' && needs.check_approvals.outputs.external_pr == 'false') ||
+      (github.event_name == 'pull_request_target' && needs.check_approvals.outputs.external_pr == 'true' && needs.check_approvals.outputs.check_approvals == 'true')) }}
+    needs: check_approvals
+    runs-on:
+      - self-hosted-nutanix-docker-small
 
     permissions:
       # required for all workflows
@@ -23,6 +46,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      # Self-hosted runners do not ship Go; CodeQL autobuild needs it on PATH.
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
 
       # Initializes the CodeQL tools for scanning.
       - name: Initialize CodeQL

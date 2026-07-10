@@ -8,7 +8,8 @@ on:
 jobs:
   build_release:
     name: Build Release
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted-nutanix-docker-small
     permissions:
       contents: write
       packages: write
