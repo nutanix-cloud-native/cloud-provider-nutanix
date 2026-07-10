@@ -1,0 +1,25 @@
+annotations:
+  artifacthub.io/containsSecurityUpdates: "true"
+  artifacthub.io/displayName: Nutanix Cloud Provider
+  artifacthub.io/maintainers: |
+    - name: Nutanix Cloud Native Team
+      email: cloudnative@nutanix.com
+apiVersion: v2
+# version and appVersion are placeholders for local development/linting only.
+# They are overwritten at release time from the git tag by
+# .github/workflows/release.yaml (helm package --version/--app-version).
+appVersion: v0.0.0
+version: 0.0.0
+description: Nutanix Cloud Provider
+home: https://github.com/nutanix-cloud-native/cloud-provider-nutanix
+icon: https://avatars2.githubusercontent.com/u/6165865?s=200&v=4
+keywords:
+- Nutanix
+- Cloud Controller Manager
+- Cloud
+- CCM
+maintainers:
+- email: cloudnative@nutanix.com
+  name: nutanix-cloud-native-bot
+name: nutanix-cloud-provider
+type: application
