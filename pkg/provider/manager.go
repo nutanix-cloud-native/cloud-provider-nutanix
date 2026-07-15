@@ -162,6 +162,12 @@ func (n *nutanixManager) getInstanceMetadata(ctx context.Context, node *v1.Node)
 			return nil, err
 		}
 	}
+
+	// Metro node-group labeling is derived purely from the VM's custom attributes
+	if err := n.reconcileMetroNodeGroupLabel(node, vm); err != nil {
+		return nil, err
+	}
+
 	return &cloudprovider.InstanceMetadata{
 		ProviderID:    providerID,
 		InstanceType:  constants.InstanceType,
@@ -221,6 +227,50 @@ func (n *nutanixManager) addCustomLabelsToNode(ctx context.Context, node *v1.Nod
 		return fmt.Errorf("error occurred while updating labels on node %s", node.Name)
 	}
 	return nil
+}
+
+// reconcileMetroNodeGroupLabel labels the node with its Nutanix Metro site group name when the
+// backing VM carries the metro-node-group-name custom attribute (set by CAPX).
+func (n *nutanixManager) reconcileMetroNodeGroupLabel(node *v1.Node, vm *vmmModels.Vm) error {
+	if node == nil {
+		return fmt.Errorf("node cannot be nil when reconciling metro node-group label")
+	}
+
+	groupName := getVMCustomAttributeValue(vm, constants.MetroNodeGroupNameAttributeKey)
+	if groupName == "" {
+		return nil
+	}
+
+	if errs := k8svalidation.IsValidLabelValue(groupName); len(errs) > 0 {
+		klog.Warningf("skipping metro node-group label on node %s: %q is not a valid Kubernetes label value: %v", node.Name, groupName, errs) //nolint:typecheck
+		return nil
+	}
+
+	if node.Labels[constants.MetroNodeGroupLabel] == groupName {
+		return nil
+	}
+
+	labels := map[string]string{constants.MetroNodeGroupLabel: groupName}
+	if ok := helpers.AddOrUpdateLabelsOnNode(n.client, labels, node); !ok {
+		return fmt.Errorf("error occurred while updating metro node-group label on node %s", node.Name)
+	}
+	klog.V(1).Infof("set metro node-group label %s=%s on node %s", constants.MetroNodeGroupLabel, groupName, node.Name) //nolint:typecheck
+	return nil
+}
+
+// getVMCustomAttributeValue returns the value of the VM custom attribute matching key, where each
+// custom attribute is encoded as "key:value". It returns an empty string if not found.
+func getVMCustomAttributeValue(vm *vmmModels.Vm, key string) string {
+	if vm == nil {
+		return ""
+	}
+	for _, attr := range vm.CustomAttributes {
+		parts := strings.SplitN(attr, ":", 2)
+		if len(parts) == 2 && strings.TrimSpace(parts[0]) == key {
+			return strings.TrimSpace(parts[1])
+		}
+	}
+	return ""
 }
 
 func (n *nutanixManager) getTopologyCategories() (config.TopologyCategories, error) {
