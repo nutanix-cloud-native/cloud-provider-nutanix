@@ -20,6 +20,7 @@ package mock
 import (
 	"context"
 
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
 	clusterModels "github.com/nutanix/ntnx-api-golang-clients/clustermgmt-go-client/v4/models/clustermgmt/v4/config"
 	prismModels "github.com/nutanix/ntnx-api-golang-clients/prism-go-client/v4/models/prism/v4/config"
 	vmmCommonModels "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/common/v1/config"
@@ -200,7 +201,7 @@ func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockE
 		MockVMMetroUUID,
 		cluster,
 		host,
-		[]string{"metro-node-group-name:" + MockMetroNodeGroupName, "otherKey:otherValue"},
+		[]string{constants.MetroNodeGroupNameAttributeKey + ":" + MockMetroNodeGroupName, "otherKey:otherValue"},
 	)
 	metroNode, err := createNodeForVM(ctx, kClient, metroVM)
 	if err != nil {
