@@ -21,8 +21,12 @@ jobs:
       check_approvals: ${{ github.event_name == 'pull_request_target' && steps.check_approvals.outputs.check_approvals || 'true' }}
       external_pr: ${{ github.event.pull_request.base.repo.clone_url != github.event.pull_request.head.repo.clone_url }}
     steps:
+      # Only require approval for external (fork) PRs. Internal PRs still
+      # trigger pull_request_target but must not fail this check, so scope the
+      # approval gate to cross-repo PRs (matching the external_pr logic below).
       - name: Check approval status
-        if: ${{ github.event_name == 'pull_request_target' }}
+        if: ${{ github.event_name == 'pull_request_target' &&
+          github.event.pull_request.base.repo.clone_url != github.event.pull_request.head.repo.clone_url }}
         id: check_approvals
         uses: nutanix-cloud-native/action-check-approvals@v1
 
