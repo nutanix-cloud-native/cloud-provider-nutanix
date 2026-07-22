@@ -15,7 +15,7 @@ jobs:
       packages: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install devbox
         run: curl -fsSL https://get.jetpack.io/devbox | bash -s -- -f
