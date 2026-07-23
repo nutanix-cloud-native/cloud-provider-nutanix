@@ -4,38 +4,25 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
-    branches: [main]
-  pull_request_target:
-    types: [opened, synchronize, reopened, labeled]
+    types: [opened, synchronize, reopened]
     branches: [main]
   schedule:
     - cron: "30 1 * * 0"
 
+# NOTE: CodeQL runs on the `pull_request` event (not `pull_request_target`) so
+# that code-scanning results are uploaded against the pull request's own ref
+# (refs/pull/<n>/head). This is required for the "CodeQL" code-scanning check to
+# report on the PR. Running under `pull_request_target` uploaded results against
+# the base ref instead, so the check stayed "Expected — Waiting for status to be
+# reported" on external/fork PRs and blocked them from merging.
+#
+# `pull_request` runs untrusted fork code with a read-only GITHUB_TOKEN and no
+# access to secrets, so the "pwn request" risk that motivated the previous
+# pull_request_target + approval gating does not apply here. Code scanning is
+# explicitly allowed to upload results on the pull_request event even with a
+# read-only token.
 jobs:
-  check_approvals:
-    runs-on:
-      - self-hosted-nutanix-docker-small
-    if: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
-    outputs:
-      check_approvals: ${{ github.event_name == 'pull_request_target' && steps.check_approvals.outputs.check_approvals || 'true' }}
-      external_pr: ${{ github.event.pull_request.base.repo.clone_url != github.event.pull_request.head.repo.clone_url }}
-    steps:
-      # Only require approval for external (fork) PRs. Internal PRs still
-      # trigger pull_request_target but must not fail this check, so scope the
-      # approval gate to cross-repo PRs (matching the external_pr logic below).
-      - name: Check approval status
-        if: ${{ github.event_name == 'pull_request_target' &&
-          github.event.pull_request.base.repo.clone_url != github.event.pull_request.head.repo.clone_url }}
-        id: check_approvals
-        uses: nutanix-cloud-native/action-check-approvals@v1
-
   CodeQL-Build:
-    if: ${{ always() &&
-      (github.event_name == 'push' || github.event_name == 'schedule' ||
-      (github.event_name == 'pull_request' && needs.check_approvals.outputs.external_pr == 'false') ||
-      (github.event_name == 'pull_request_target' && needs.check_approvals.outputs.external_pr == 'true' && needs.check_approvals.outputs.check_approvals == 'true')) }}
-    needs: check_approvals
     runs-on:
       - self-hosted-nutanix-docker-small
 
@@ -48,14 +35,10 @@ jobs:
       contents: read
 
     steps:
+      # Default checkout: for pull_request this checks out the PR merge ref, so
+      # the analysis is associated with the pull request.
       - name: Checkout repository
         uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          # External PRs run via pull_request_target and are gated behind
-          # maintainer approval (check_approvals job), so opting in to fork
-          # checkout here is safe.
-          allow-unsafe-pr-checkout: true
 
       # Self-hosted runners do not ship Go; CodeQL autobuild needs it on PATH.
       - name: Set up Go
