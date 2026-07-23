@@ -21,10 +21,12 @@ on:
 # pull_request_target + approval gating does not apply here. Code scanning is
 # explicitly allowed to upload results on the pull_request event even with a
 # read-only token.
+#
+# This job runs on GitHub-hosted runners so untrusted fork code is compiled in
+# an ephemeral sandbox rather than on self-hosted infrastructure.
 jobs:
   CodeQL-Build:
-    runs-on:
-      - self-hosted-nutanix-docker-small
+    runs-on: ubuntu-latest
 
     permissions:
       # required for all workflows
@@ -40,7 +42,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      # Self-hosted runners do not ship Go; CodeQL autobuild needs it on PATH.
+      # Pin the Go toolchain to the module's version so CodeQL autobuild uses
+      # the expected compiler rather than the runner's preinstalled default.
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
