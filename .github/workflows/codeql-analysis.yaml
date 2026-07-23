@@ -21,8 +21,12 @@ jobs:
       check_approvals: ${{ github.event_name == 'pull_request_target' && steps.check_approvals.outputs.check_approvals || 'true' }}
       external_pr: ${{ github.event.pull_request.base.repo.clone_url != github.event.pull_request.head.repo.clone_url }}
     steps:
+      # Only require approval for external (fork) PRs. Internal PRs still
+      # trigger pull_request_target but must not fail this check, so scope the
+      # approval gate to cross-repo PRs (matching the external_pr logic below).
       - name: Check approval status
-        if: ${{ github.event_name == 'pull_request_target' }}
+        if: ${{ github.event_name == 'pull_request_target' &&
+          github.event.pull_request.base.repo.clone_url != github.event.pull_request.head.repo.clone_url }}
         id: check_approvals
         uses: nutanix-cloud-native/action-check-approvals@v1
 
@@ -45,9 +49,13 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # External PRs run via pull_request_target and are gated behind
+          # maintainer approval (check_approvals job), so opting in to fork
+          # checkout here is safe.
+          allow-unsafe-pr-checkout: true
 
       # Self-hosted runners do not ship Go; CodeQL autobuild needs it on PATH.
       - name: Set up Go
