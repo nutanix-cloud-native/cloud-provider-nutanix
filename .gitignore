@@ -20,7 +20,7 @@ cloud-provider-nutanix
 vendor/
 
 # Go workspace file
-go.work
+/go.work
 
 .DS_Store
 .idea
