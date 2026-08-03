@@ -35,6 +35,15 @@ func newInstancesV2(nutanixManager *nutanixManager) cloudprovider.InstancesV2 {
 }
 
 func (i *instancesV2) InstanceExists(ctx context.Context, node *v1.Node) (bool, error) {
+	isManaged, providerIDScheme, err := i.nutanixManager.isNodeNutanixManaged(node)
+	if err != nil {
+		return false, err
+	}
+	if !isManaged {
+		klog.V(2).InfoS("Skipping InstanceExists reconciliation for non-nutanix provider", "node", node.Name, "providerIDScheme", providerIDScheme) //nolint:typecheck
+		return true, nil
+	}
+
 	ok, err := i.nutanixManager.nodeExists(ctx, node)
 	if err != nil {
 		return ok, err
@@ -44,6 +53,15 @@ func (i *instancesV2) InstanceExists(ctx context.Context, node *v1.Node) (bool, 
 }
 
 func (i *instancesV2) InstanceShutdown(ctx context.Context, node *v1.Node) (bool, error) {
+	isManaged, providerIDScheme, err := i.nutanixManager.isNodeNutanixManaged(node)
+	if err != nil {
+		return false, err
+	}
+	if !isManaged {
+		klog.V(2).InfoS("Skipping InstanceShutdown reconciliation for non-nutanix provider", "node", node.Name, "providerIDScheme", providerIDScheme) //nolint:typecheck
+		return false, nil
+	}
+
 	ok, err := i.nutanixManager.isNodeShutdown(ctx, node)
 	if err != nil {
 		return ok, err
@@ -53,9 +71,24 @@ func (i *instancesV2) InstanceShutdown(ctx context.Context, node *v1.Node) (bool
 }
 
 func (i *instancesV2) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloudprovider.InstanceMetadata, error) {
-	md, err := i.nutanixManager.getInstanceMetadata(ctx, node)
+	isManaged, providerIDScheme, err := i.nutanixManager.isNodeNutanixManaged(node)
 	if err != nil {
-		return md, err
+		return nil, err
+	}
+
+	var md *cloudprovider.InstanceMetadata
+	if isManaged {
+		md, err = i.nutanixManager.getInstanceMetadata(ctx, node)
+		if err != nil {
+			return md, err
+		}
+	} else {
+		klog.V(2).InfoS("Skipping InstanceMetadata reconciliation for non-nutanix provider", "node", node.Name, "providerIDScheme", providerIDScheme) //nolint:typecheck
+		// Just pass through the minimal metadata for non-nutanix providers.
+		md = &cloudprovider.InstanceMetadata{
+			ProviderID:    node.Spec.ProviderID,
+			NodeAddresses: node.Status.Addresses,
+		}
 	}
 	klog.V(1).InfoS("InstanceMetadata", "node", node.Name, "metadata", md) //nolint:typecheck
 	return md, err

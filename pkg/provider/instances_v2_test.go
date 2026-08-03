@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"go4.org/netipx"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/uuid"
@@ -294,6 +295,59 @@ var _ = Describe("Test InstancesV2", func() { // nolint:typecheck
 			manager := &nutanixManager{}
 			instances := newInstancesV2(manager)
 			Expect(instances).ToNot(BeNil())
+		})
+	})
+
+	Context("Test non-nutanix provider ownership", func() {
+		It("should skip InstanceExists for another-provider nodes", func() {
+			node := &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "another-provider-node"},
+				Spec:       v1.NodeSpec{ProviderID: "another-provider://1234"},
+			}
+
+			exists, err := i.InstanceExists(ctx, node)
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(exists).To(BeTrue())
+		})
+
+		It("should skip InstanceShutdown for another-provider nodes", func() {
+			node := &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "another-provider-node"},
+				Spec:       v1.NodeSpec{ProviderID: "another-provider://1234"},
+			}
+
+			shutdown, err := i.InstanceShutdown(ctx, node)
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(shutdown).To(BeFalse())
+		})
+
+		It("should skip InstanceMetadata for another-provider nodes", func() {
+			node := &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "another-provider-node"},
+				Spec:       v1.NodeSpec{ProviderID: "another-provider://1234"},
+				Status: v1.NodeStatus{
+					Addresses: []v1.NodeAddress{
+						{Type: v1.NodeInternalIP, Address: "10.10.10.10"},
+						{Type: v1.NodeHostName, Address: "another-provider-node"},
+					},
+				},
+			}
+
+			metadata, err := i.InstanceMetadata(ctx, node)
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(metadata).ToNot(BeNil())
+			Expect(metadata.ProviderID).To(Equal(node.Spec.ProviderID))
+			Expect(metadata.NodeAddresses).To(Equal(node.Status.Addresses))
+		})
+
+		It("should continue reconciling nutanix-managed nodes", func() {
+			node := mockEnvironment.GetNode(mock.MockVMNamePoweredOn)
+			Expect(node).ToNot(BeNil())
+			node.Spec.ProviderID = "nutanix://some-vm-id"
+
+			exists, err := i.InstanceExists(ctx, node)
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(exists).To(BeTrue())
 		})
 	})
 })

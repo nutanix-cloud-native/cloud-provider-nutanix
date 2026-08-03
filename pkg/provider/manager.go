@@ -369,6 +369,25 @@ func (n *nutanixManager) getNutanixProviderIDForNode(ctx context.Context, node *
 	return providerID, nil
 }
 
+func (n *nutanixManager) isNodeNutanixManaged(node *v1.Node) (bool, string, error) {
+	if node == nil {
+		return false, "", fmt.Errorf("node cannot be nil when checking provider ownership")
+	}
+
+	providerID := strings.TrimSpace(node.Spec.ProviderID)
+	if providerID == "" {
+		return true, "", nil
+	}
+
+	scheme := getProviderIDScheme(providerID)
+	return strings.EqualFold(scheme, constants.ProviderName), scheme, nil
+}
+
+func getProviderIDScheme(providerID string) string {
+	parts := strings.SplitN(strings.TrimSpace(providerID), "://", 2)
+	return strings.ToLower(strings.TrimSpace(parts[0]))
+}
+
 func (n *nutanixManager) generateProviderID(ctx context.Context, vmUUID string) (string, error) {
 	if vmUUID == "" {
 		return "", fmt.Errorf("VM UUID cannot be empty when generating nutanix provider ID for node")
