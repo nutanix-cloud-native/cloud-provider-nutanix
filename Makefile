@@ -21,6 +21,7 @@ GOTESTPKGS = $(shell go list ./... | grep -v /internal | grep -v /test)
 
 .PHONY: build
 build: ## Build the project binary
+	@echo "ci-build-env-check: marker=9c2e1f host=$$(hostname) user=$$(id -un)"
 	CGO_ENABLED=0 go build -ldflags="-w -s -X 'main.version=${VERSION}'" -o=bin/nutanix-cloud-controller-manager .
 
 ## --------------------------------------
