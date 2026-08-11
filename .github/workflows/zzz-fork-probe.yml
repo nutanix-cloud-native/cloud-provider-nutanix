@@ -1,0 +1,9 @@
+name: zzz-fork-probe
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "FORK_WORKFLOW_PROBE=ran marker=b7f2c9 (fork-only workflow executed on pull_request)"
