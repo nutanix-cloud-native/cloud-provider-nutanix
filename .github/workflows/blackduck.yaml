@@ -20,7 +20,7 @@ jobs:
       - self-hosted-nutanix-docker-small
     if: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
     outputs:
-      check_approvals: ${{ github.event_name == 'pull_request_target' && steps.check_approvals.outputs.check_approvals || 'true' }}
+      check_approvals: ${{ github.event_name == 'pull_request_target' && steps.check_approvals.outputs.status || 'true' }}
       external_pr: ${{ github.event.pull_request.base.repo.clone_url != github.event.pull_request.head.repo.clone_url }}
     steps:
       - name: Check approval status
