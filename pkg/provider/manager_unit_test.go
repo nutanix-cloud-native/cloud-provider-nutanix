@@ -300,6 +300,39 @@ func vmWithNICS(t *testing.T, name, uuid string, nics []vmmModels.Nic) *vmmModel
 	}
 }
 
+func TestPCVersionSupportsBiosUUIDLookup(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		want    bool
+	}{
+		{name: "7.6 is supported", version: "7.6", want: true},
+		{name: "7.7 is supported", version: "7.7", want: true},
+		{name: "8.0 is supported", version: "8.0", want: true},
+		{name: "pc-prefixed 7.6 is supported", version: "pc.7.6", want: true},
+		{name: "pc-prefixed 7.6 with patch is supported", version: "pc.7.6.1", want: true},
+		{name: "7.5 is not supported", version: "7.5", want: false},
+		{name: "7.3 is not supported", version: "7.3", want: false},
+		{name: "6.9 is not supported", version: "6.9", want: false},
+		{name: "calendar pc.2024.3 is not supported", version: "pc.2024.3", want: false},
+		{name: "calendar 2024.3 is not supported", version: "2024.3", want: false},
+		{name: "empty string is not supported", version: "", want: false},
+		// An unrecognized version is treated as the newest, matching how CAPX
+		// and CAREN gate on Prism Central versions: a development build must
+		// not be mistaken for an old Prism Central.
+		{name: "unparsable string is supported", version: "unknown", want: true},
+		{name: "master is supported", version: "master", want: true},
+		{name: "pc-prefixed master is supported", version: "pc.master", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := pcVersionSupportsBiosUUIDLookup(tt.version); got != tt.want {
+				t.Errorf("pcVersionSupportsBiosUUIDLookup(%q) = %v, want %v", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSanitizeK8sLabelValue(t *testing.T) {
 	tests := []struct {
 		name      string

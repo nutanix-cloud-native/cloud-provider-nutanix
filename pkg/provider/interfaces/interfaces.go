@@ -20,6 +20,7 @@ import (
 	"context"
 
 	clusterModels "github.com/nutanix/ntnx-api-golang-clients/clustermgmt-go-client/v4/models/clustermgmt/v4/config"
+	multidomainModels "github.com/nutanix/ntnx-api-golang-clients/multidomain-go-client/v4/models/multidomain/v4/config"
 	prismModels "github.com/nutanix/ntnx-api-golang-clients/prism-go-client/v4/models/prism/v4/config"
 	vmmModels "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/vmm/v4/ahv/config"
 	"k8s.io/client-go/informers"
@@ -31,9 +32,17 @@ type Client interface {
 }
 
 type Prism interface {
+	IsProjectScoped(ctx context.Context) bool
 	GetVM(ctx context.Context, vmUUID string) (*vmmModels.Vm, error)
+	GetVMByBiosUUid(ctx context.Context, biosUUID string) (*vmmModels.Vm, error)
 	GetCluster(ctx context.Context, clusterUUID string) (*clusterModels.Cluster, error)
 	ListAllCluster(ctx context.Context) ([]clusterModels.Cluster, error)
+	ListAllProject(ctx context.Context) ([]multidomainModels.Project, error)
+	GetDefaultProject(ctx context.Context) (*multidomainModels.Project, error)
+	GetDefaultProjectExtId(ctx context.Context) *string
+	GetResourceGroups(ctx context.Context) ([]multidomainModels.ResourceGroup, error)
+	ListDomainManagers(ctx context.Context) ([]prismModels.DomainManager, error)
 	GetCategory(ctx context.Context, categoryUUID string) (*prismModels.Category, error)
 	GetClusterHost(ctx context.Context, clusterUuid string, hostUUID string) (*clusterModels.Host, error)
+	GetPrismCentralVersion(ctx context.Context) (string, error)
 }

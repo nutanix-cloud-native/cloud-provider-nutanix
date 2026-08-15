@@ -22,13 +22,13 @@ import (
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/interfaces"
 )
 
-// MockClient is a mock implementation of the interfaces.Client interface
+// MockClient is a mock implementation of the interfaces.Client interface.
 type MockClient struct {
 	mockPrism       MockPrism
 	sharedInformers informers.SharedInformerFactory
 }
 
-// CreateMockClient creates a new MockClient
+// CreateMockClient creates a new MockClient.
 func CreateMockClient(mockEnvironment MockEnvironment) *MockClient {
 	return &MockClient{
 		mockPrism: MockPrism{
@@ -37,12 +37,12 @@ func CreateMockClient(mockEnvironment MockEnvironment) *MockClient {
 	}
 }
 
-// Get returns the mockPrism
+// Get returns the mockPrism.
 func (mc *MockClient) Get() (interfaces.Prism, error) {
 	return &mc.mockPrism, nil
 }
 
-// SetInformers sets the sharedInformers
+// SetInformers sets the sharedInformers.
 func (mc *MockClient) SetInformers(sharedInformers informers.SharedInformerFactory) {
 	mc.sharedInformers = sharedInformers
 }

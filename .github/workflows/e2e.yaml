@@ -70,3 +70,10 @@ jobs:
           LOCAL_IMAGE_REGISTRY: ${{ secrets.LOCAL_IMAGE_REGISTRY }}
           CONTROL_PLANE_ENDPOINT_IP: ${{ steps.get-control-plane-endpoint-ip.outputs.control_plane_endpoint_ip }}
           NUTANIX_SSH_AUTHORIZED_KEY: fake-key
+          # Target project for both the non-default-project (non-project-scoped creds, above) and
+          # project-scoped-user scenarios; the latter also needs its own project-scoped credentials.
+          # Both scenarios Skip() when these are unset, so leaving them unset makes the job pass
+          # without ever running them.
+          NUTANIX_PROJECT_SCOPED_PC_PROJECT: ${{ vars.NUTANIX_PROJECT_SCOPED_PC_PROJECT }}
+          NUTANIX_PROJECT_SCOPED_USER: ${{ secrets.NUTANIX_PROJECT_SCOPED_USER }}
+          NUTANIX_PROJECT_SCOPED_PASSWORD: ${{ secrets.NUTANIX_PROJECT_SCOPED_PASSWORD }}
