@@ -26,9 +26,14 @@ import (
 	"github.com/onsi/gomega/gstruct"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/utils/ptr"
 
+	"github.com/nutanix-cloud-native/prism-go-client/converged"
+	clusterModels "github.com/nutanix/ntnx-api-golang-clients/clustermgmt-go-client/v4/models/clustermgmt/v4/config"
+	multidomainModels "github.com/nutanix/ntnx-api-golang-clients/multidomain-go-client/v4/models/multidomain/v4/config"
 	vmmModels "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/vmm/v4/ahv/config"
 
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/testing/mock"
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/interfaces"
@@ -274,12 +279,41 @@ var _ = Describe("Test Manager", func() { // nolint:typecheck
 			Expect(err).Should(HaveOccurred())
 		})
 
-		It("should return providerID from VM ExtId when no customAttributes", func() { // nolint:typecheck
+		It("should return providerID from BiosUuid when no customAttributes", func() { // nolint:typecheck
 			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
 			Expect(vm).ToNot(BeNil())
 			providerID, err := m.generateProviderIDFromVM(ctx, vm)
 			Expect(err).ToNot(HaveOccurred())
+			Expect(providerID).To(Equal(fmt.Sprintf("nutanix://%s", *vm.BiosUuid)))
+		})
+
+		It("should prefer BiosUuid over ExtId", func() { // nolint:typecheck
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
+			Expect(vm).ToNot(BeNil())
+			vm.BiosUuid = ptr.To("bios-uuid-different")
+			vm.ExtId = ptr.To("ext-id-different")
+			providerID, err := m.generateProviderIDFromVM(ctx, vm)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(providerID).To(Equal("nutanix://bios-uuid-different"))
+		})
+
+		It("should fallback to ExtId when BiosUuid is nil", func() { // nolint:typecheck
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
+			Expect(vm).ToNot(BeNil())
+			vm.BiosUuid = nil
+			providerID, err := m.generateProviderIDFromVM(ctx, vm)
+			Expect(err).ToNot(HaveOccurred())
 			Expect(providerID).To(Equal(fmt.Sprintf("nutanix://%s", *vm.ExtId)))
+		})
+
+		It("should fail when both BiosUuid and ExtId are empty", func() { // nolint:typecheck
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
+			Expect(vm).ToNot(BeNil())
+			vm.BiosUuid = nil
+			vm.ExtId = nil
+			vm.CustomAttributes = nil
+			_, err := m.generateProviderIDFromVM(ctx, vm)
+			Expect(err).Should(HaveOccurred())
 		})
 
 		It("should return providerID from customAttributes when present", func() { // nolint:typecheck
@@ -364,6 +398,230 @@ var _ = Describe("Test Manager", func() { // nolint:typecheck
 		It("should fail if vm is empty", func() { // nolint:typecheck
 			err := m.getTopologyInfoUsingPrism(ctx, nClient, nil, nil)
 			Expect(err).Should(HaveOccurred())
+		})
+
+		It("should use domain manager and resource groups for project-scoped topology", func() {
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
+			Expect(vm).ToNot(BeNil())
+			vm.Project = &vmmModels.ProjectReference{ExtId: ptr.To("project-1")}
+			mockPrism := nClient.(*mock.MockPrism)
+			mockPrism.IsProjectScopedOverride = func(_ context.Context) bool {
+				return true
+			}
+			mockPrism.ListAllClusterOverride = func(_ context.Context) ([]clusterModels.Cluster, error) {
+				return nil, fmt.Errorf("ListAllCluster must not be called for project-scoped prism topology")
+			}
+			mockPrism.GetClusterOverride = func(_ context.Context, _ string) (*clusterModels.Cluster, error) {
+				return nil, fmt.Errorf("GetCluster must not be called for project-scoped prism topology")
+			}
+
+			topologyInfo := &config.TopologyInfo{}
+			err := m.getTopologyInfoUsingPrism(ctx, nClient, vm, topologyInfo)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(topologyInfo.Region).To(Equal(mock.MockPrismCentral))
+			Expect(topologyInfo.Zone).To(Equal(mock.MockClusterUUID))
+		})
+	})
+
+	Context("Test resolveVM", func() {
+		It("should return VM when found by BIOS UUID", func() {
+			vm, err := m.resolveVM(ctx, nClient, mock.MockVMPoweredOnUUID)
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(vm).ToNot(BeNil())
+			Expect(*vm.ExtId).To(Equal(mock.MockVMPoweredOnUUID))
+		})
+
+		It("should return not-found error when VM not found by either method", func() {
+			_, err := m.resolveVM(ctx, nClient, "non-existing-uuid")
+			Expect(err).Should(HaveOccurred())
+		})
+
+		It("should fallback to GetVM when BIOS UUID lookup returns not-found", func() {
+			mockPrism := nClient.(*mock.MockPrism)
+			mockPrism.GetVMByBiosUUidOverride = func(_ context.Context, _ string) (*vmmModels.Vm, error) {
+				return nil, &converged.APIError{Kind: converged.ErrNotFound, Cause: fmt.Errorf("BIOS_UUID_NOT_FOUND")}
+			}
+
+			vm, err := m.resolveVM(ctx, nClient, mock.MockVMPoweredOnUUID)
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(vm).ToNot(BeNil())
+			Expect(*vm.ExtId).To(Equal(mock.MockVMPoweredOnUUID))
+		})
+
+		It("should fallback to GetVM when BIOS UUID lookup fails with non-not-found error (PC 7.5 compat)", func() {
+			mockPrism := nClient.(*mock.MockPrism)
+			mockPrism.GetVMByBiosUUidOverride = func(_ context.Context, _ string) (*vmmModels.Vm, error) {
+				return nil, fmt.Errorf("internal server error")
+			}
+
+			vm, err := m.resolveVM(ctx, nClient, mock.MockVMPoweredOnUUID)
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(vm).ToNot(BeNil())
+			Expect(*vm.ExtId).To(Equal(mock.MockVMPoweredOnUUID))
+		})
+
+		Context("on Prism Central 7.6+ (BIOS UUID lookup supported)", func() {
+			BeforeEach(func() {
+				mockPrism := nClient.(*mock.MockPrism)
+				mockPrism.GetPrismCentralVersionOverride = func(_ context.Context) (string, error) {
+					return "7.6", nil
+				}
+			})
+
+			It("should resolve by BIOS UUID without falling back", func() {
+				vm, err := m.resolveVM(ctx, nClient, mock.MockVMPoweredOnUUID)
+				Expect(err).ShouldNot(HaveOccurred())
+				Expect(vm).ToNot(BeNil())
+				Expect(*vm.ExtId).To(Equal(mock.MockVMPoweredOnUUID))
+			})
+
+			It("should fall back to GetVM by ExtId on non-not-found errors", func() {
+				mockPrism := nClient.(*mock.MockPrism)
+				mockPrism.GetVMByBiosUUidOverride = func(_ context.Context, _ string) (*vmmModels.Vm, error) {
+					return nil, &converged.APIError{Kind: converged.ErrInternal, Cause: fmt.Errorf("transient")}
+				}
+
+				// On a non-not-found error the BIOS UUID lookup is inconclusive,
+				// so resolveVM falls back to the ExtId lookup which succeeds.
+				vm, err := m.resolveVM(ctx, nClient, mock.MockVMPoweredOnUUID)
+				Expect(err).ShouldNot(HaveOccurred())
+				Expect(vm).ToNot(BeNil())
+				Expect(*vm.ExtId).To(Equal(mock.MockVMPoweredOnUUID))
+			})
+
+			It("should return not-found without falling back to GetVM", func() {
+				mockPrism := nClient.(*mock.MockPrism)
+				mockPrism.GetVMByBiosUUidOverride = func(_ context.Context, _ string) (*vmmModels.Vm, error) {
+					return nil, &converged.APIError{Kind: converged.ErrNotFound, Cause: fmt.Errorf("BIOS_UUID_NOT_FOUND")}
+				}
+
+				// A definitive not-found means the VM does not exist, so the
+				// error is surfaced instead of being masked by the ExtId fallback.
+				_, err := m.resolveVM(ctx, nClient, mock.MockVMPoweredOnUUID)
+				Expect(err).Should(HaveOccurred())
+				Expect(converged.IsNotFound(err)).To(BeTrue())
+			})
+		})
+	})
+
+	Context("Test Label Functions", func() {
+		BeforeEach(func() {
+			mockPrism := nClient.(*mock.MockPrism)
+			mockPrism.GetPrismCentralVersionOverride = func(_ context.Context) (string, error) {
+				return "7.6", nil
+			}
+		})
+
+		It("should build labels for project scoped VMs", func() { // nolint:typecheck
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
+			Expect(vm).ToNot(BeNil())
+			vm.Project = &vmmModels.ProjectReference{ExtId: ptr.To("project-1")}
+
+			labels, err := ProjectScopedLabels(ctx, nClient, vm)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(labels).To(HaveKeyWithValue(constants.ProjectUUIDLabel, "project-1"))
+			Expect(labels).To(HaveKeyWithValue(constants.ResourceGroupUUIDLabel, "rg-1"))
+			Expect(labels).To(HaveKeyWithValue(constants.PEUUIDLabel, mock.MockClusterUUID))
+			Expect(labels).To(HaveKeyWithValue(constants.PENameLabel, mock.MockCluster))
+		})
+
+		It("should build labels for non project scoped VMs", func() { // nolint:typecheck
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
+			Expect(vm).ToNot(BeNil())
+			vm.Project = &vmmModels.ProjectReference{ExtId: ptr.To("project-1")}
+
+			labels, err := ProjectNonScopedLabels(ctx, nClient, vm)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(labels).To(HaveKeyWithValue(constants.ProjectUUIDLabel, "project-1"))
+			Expect(labels).To(HaveKeyWithValue(constants.ResourceGroupUUIDLabel, "rg-1"))
+			Expect(labels).To(HaveKeyWithValue(constants.PEUUIDLabel, mock.MockClusterUUID))
+			Expect(labels).To(HaveKey(constants.PENameLabel))
+			Expect(labels).ToNot(HaveKey(constants.HostUUIDLabel))
+			Expect(labels).ToNot(HaveKey(constants.HostNameLabel))
+		})
+
+		It("should build host labels for a VM's cluster host", func() {
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
+			Expect(vm).ToNot(BeNil())
+
+			labels, err := hostLabels(ctx, nClient, vm)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(labels).To(HaveKeyWithValue(constants.HostUUIDLabel, mock.MockHostUUID))
+			Expect(labels).To(HaveKey(constants.HostNameLabel))
+		})
+
+		It("should keep VM project label when default project is available", func() {
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
+			Expect(vm).ToNot(BeNil())
+			vm.Project = &vmmModels.ProjectReference{ExtId: ptr.To("project-1")}
+
+			mockPrism := nClient.(*mock.MockPrism)
+			mockPrism.GetDefaultProjectExtIdOverride = func(_ context.Context) *string {
+				return ptr.To(zeroUUID)
+			}
+
+			labels, err := ProjectNonScopedLabels(ctx, nClient, vm)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(labels).To(HaveKeyWithValue(constants.ProjectUUIDLabel, "project-1"))
+			Expect(labels).To(HaveKeyWithValue(constants.ResourceGroupUUIDLabel, "rg-1"))
+		})
+
+		It("should use zeroUUID project label when VM has no project", func() {
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
+			Expect(vm).ToNot(BeNil())
+			vm.Project = nil
+
+			mockPrism := nClient.(*mock.MockPrism)
+			mockPrism.GetDefaultProjectExtIdOverride = func(_ context.Context) *string {
+				return ptr.To(zeroUUID)
+			}
+
+			labels, err := ProjectNonScopedLabels(ctx, nClient, vm)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(labels).To(HaveKeyWithValue(constants.ProjectUUIDLabel, zeroUUID))
+			Expect(labels).ToNot(HaveKey(constants.ResourceGroupUUIDLabel))
+		})
+
+		It("should skip resource-group APIs when the VM is in the default project", func() {
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
+			Expect(vm).ToNot(BeNil())
+			defaultProjectExtId := "default-project-uuid"
+			vm.Project = &vmmModels.ProjectReference{ExtId: ptr.To(defaultProjectExtId)}
+
+			mockPrism := nClient.(*mock.MockPrism)
+			mockPrism.GetDefaultProjectExtIdOverride = func(_ context.Context) *string {
+				return ptr.To(defaultProjectExtId)
+			}
+			mockPrism.GetResourceGroupsOverride = func(_ context.Context) ([]multidomainModels.ResourceGroup, error) {
+				Fail("GetResourceGroups must not be called for VMs in the default project")
+				return nil, nil
+			}
+
+			labels, err := ProjectNonScopedLabels(ctx, nClient, vm)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(labels).To(HaveKeyWithValue(constants.ProjectUUIDLabel, defaultProjectExtId))
+			Expect(labels).ToNot(HaveKey(constants.ResourceGroupUUIDLabel))
+			Expect(labels).To(HaveKeyWithValue(constants.PEUUIDLabel, mock.MockClusterUUID))
+		})
+
+		It("should skip project and resource-group labels on PC versions below 7.6", func() {
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
+			Expect(vm).ToNot(BeNil())
+			vm.Project = &vmmModels.ProjectReference{ExtId: ptr.To("project-1")}
+
+			mockPrism := nClient.(*mock.MockPrism)
+			mockPrism.GetPrismCentralVersionOverride = func(_ context.Context) (string, error) {
+				return "7.5", nil
+			}
+			mockPrism.GetResourceGroupsOverride = func(_ context.Context) ([]multidomainModels.ResourceGroup, error) {
+				Fail("GetResourceGroups must not be called for PC versions below 7.6")
+				return nil, nil
+			}
+
+			labels, err := ProjectNonScopedLabels(ctx, nClient, vm)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(labels).ToNot(HaveKey(constants.ProjectUUIDLabel))
+			Expect(labels).ToNot(HaveKey(constants.ResourceGroupUUIDLabel))
 		})
 	})
 

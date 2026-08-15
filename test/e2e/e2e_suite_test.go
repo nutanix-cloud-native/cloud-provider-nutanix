@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -122,7 +123,30 @@ func loadE2EConfig(configPath string) *clusterctl.E2EConfig {
 	config := clusterctl.LoadE2EConfig(ctx, clusterctl.LoadE2EConfigInput{ConfigPath: configPath})
 	Expect(config).ToNot(BeNil(), "Failed to load E2E config from %s", configPath)
 
+	resolveRelativeComponentSources(config, filepath.Dir(configPath))
+
 	return config
+}
+
+func resolveRelativeComponentSources(config *clusterctl.E2EConfig, configDirectory string) {
+	for providerIndex := range config.Providers {
+		for versionIndex := range config.Providers[providerIndex].Versions {
+			version := &config.Providers[providerIndex].Versions[versionIndex]
+			if version.Type != clusterctl.URLSource {
+				continue
+			}
+
+			sourceURL, err := url.Parse(version.Value)
+			if err != nil || sourceURL.Scheme != "" {
+				continue
+			}
+
+			sourcePath := filepath.Join(configDirectory, version.Value)
+			if _, err := os.Stat(sourcePath); err == nil {
+				version.Value = sourcePath
+			}
+		}
+	}
 }
 
 func createClusterctlLocalRepository(config *clusterctl.E2EConfig, repositoryFolder string) string {
