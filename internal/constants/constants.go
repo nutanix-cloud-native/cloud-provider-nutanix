@@ -32,7 +32,7 @@ const (
 	CustomHostUUIDLabel            string = "nutanix.com/prism-host-uuid"
 	CustomHostNameLabel            string = "nutanix.com/prism-host-name"
 	MetroNodeGroupLabel            string = "nutanix.com/metro-site-group"
-	MetroNodeGroupNameAttributeKey string = "nutanix.com/metro-node-group-name"
+	MetroNodeGroupNameAttributeKey string = "metro-node-group-name"
 
 	PrismCentralService string = "PRISM_CENTRAL"
 )
