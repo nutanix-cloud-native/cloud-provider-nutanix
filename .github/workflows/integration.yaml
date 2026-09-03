@@ -1,0 +1,38 @@
+on:
+  workflow_call:
+
+jobs:
+  integration-test:
+    runs-on:
+      - self-hosted-nutanix-docker-medium
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: "${{ github.event.pull_request.head.sha }}"
+
+      - name: Install devbox
+        uses: jetify-com/devbox-install-action@v0.14.0
+        with:
+          enable-cache: "false"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/golangci-lint
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Run PC-direct integration tests
+        run: devbox run -- make test-integration
+        env:
+          # Same Prism Central credentials as e2e (NUTANIX_*), mapped to the
+          # NUTANIX_E2E_* names expected by test/integration.
+          NUTANIX_E2E_ENDPOINT: ${{ secrets.NUTANIX_ENDPOINT }}
+          NUTANIX_E2E_USERNAME: ${{ secrets.NUTANIX_USER }}
+          NUTANIX_E2E_PASSWORD: ${{ secrets.NUTANIX_PASSWORD }}
+          NUTANIX_E2E_PORT: "9440"
+          NUTANIX_E2E_INSECURE: "true"

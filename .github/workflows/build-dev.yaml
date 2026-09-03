@@ -110,3 +110,10 @@ jobs:
     permissions:
       contents: read
       checks: write
+  integration:
+    needs: check_approvals
+    uses: ./.github/workflows/integration.yaml
+    secrets: inherit
+    permissions:
+      contents: read
+      checks: write

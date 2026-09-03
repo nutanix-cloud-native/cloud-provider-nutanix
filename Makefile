@@ -71,6 +71,18 @@ ifeq ($(EXPORT_RESULT), true)
 endif
 
 ## --------------------------------------
+## Integration tests (PC-direct)
+## --------------------------------------
+# Requires: NUTANIX_E2E_ENDPOINT NUTANIX_E2E_PORT NUTANIX_E2E_USERNAME
+#           NUTANIX_E2E_PASSWORD NUTANIX_E2E_INSECURE
+# CI: .github/workflows/integration.yaml (separate job; maps the same
+# NUTANIX_ENDPOINT / NUTANIX_USER / NUTANIX_PASSWORD secrets as e2e).
+
+.PHONY: test-integration
+test-integration: ## Run PC-direct integration tests (RetryOnStale / StripSDKAuthorization)
+	go test -tags=integration ./test/integration/ -count=1 -v
+
+## --------------------------------------
 ## E2E tests
 ## --------------------------------------
 
@@ -79,11 +91,25 @@ GINKGO_NODES  ?= 1
 E2E_DIR ?= ${REPO_ROOT}/test/e2e
 E2E_CONF_FILE  ?= ${E2E_DIR}/config/nutanix.yaml
 GINKGO_NOCOLOR ?= false
-LABEL_FILTERS = ""
+LABEL_FILTERS ?= ""
 CNI_PATH_CILIUM = "${E2E_DIR}/data/cni/cilium/cilium.yaml" # helm template cilium cilium/cilium --version 1.13.0 -n kube-system --set hubble.enabled=false --set cni.chainingMode=portmap  --set sessionAffinity=true | sed 's/${BIN_PATH}/$BIN_PATH/g'
+# Note: stale-session e2e is labeled only "stale-session" (not "capx") and is excluded
+# from CI, which runs LABEL_FILTERS=capx. Opt-in: LABEL_FILTERS=stale-session make test-e2e
+# (long-running: waits for real PC IAM session expiry; timeout below is 1h default —
+# raise GINKGO_TIMEOUT when running stale-session).
+GINKGO_TIMEOUT ?= 1h
 
 .PHONY: test-e2e
 test-e2e: docker-push ## Run the e2e tests
+	@echo "Running e2e tests with the following environment variables:"
+	@echo "CNI=$(CNI_PATH_CILIUM)"
+	@echo "CCM_REPO=$(IMG_REPO)"
+	@echo "CCM_TAG=$(IMG_TAG)"
+	@echo "LABEL_FILTERS=$(LABEL_FILTERS)"
+	@echo "GINKGO_NODES=$(GINKGO_NODES)"
+	@echo "GINKGO_NOCOLOR=$(GINKGO_NOCOLOR)"
+	@echo "ARTIFACTS=$(ARTIFACTS)"
+	@echo "JUNIT_REPORT_FILE=$(JUNIT_REPORT_FILE)"
 	mkdir -p $(ARTIFACTS)
 	NUTANIX_LOG_LEVEL=debug CNI=$(CNI_PATH_CILIUM) CCM_REPO=$(IMG_REPO) CCM_TAG=$(IMG_TAG) ginkgo -v \
 		--trace \
@@ -93,7 +119,7 @@ test-e2e: docker-push ## Run the e2e tests
 		--no-color=$(GINKGO_NOCOLOR) \
 		--output-dir="$(ARTIFACTS)" \
 		--junit-report=${JUNIT_REPORT_FILE} \
-		--timeout="1h" \
+		--timeout="$(GINKGO_TIMEOUT)" \
 		./test/e2e -- \
 		-e2e.artifacts-folder="$(ARTIFACTS)" \
 		-e2e.config="$(E2E_CONF_FILE)" \

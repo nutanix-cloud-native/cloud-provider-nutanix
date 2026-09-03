@@ -145,21 +145,36 @@ type nutanixClient struct {
 }
 
 func (client *nutanixClient) GetVM(ctx context.Context, vmUUID string) (*vmmModels.Vm, error) {
-	return client.convergedClient.VMs.Get(ctx, vmUUID)
+	return convergedV4.RetryOnStale(client.convergedClient, func(c *convergedV4.Client) (*vmmModels.Vm, error) {
+		client.convergedClient = c
+		return c.VMs.Get(ctx, vmUUID)
+	})
 }
 
 func (client *nutanixClient) GetCluster(ctx context.Context, clusterUUID string) (*clusterModels.Cluster, error) {
-	return client.convergedClient.Clusters.Get(ctx, clusterUUID)
+	return convergedV4.RetryOnStale(client.convergedClient, func(c *convergedV4.Client) (*clusterModels.Cluster, error) {
+		client.convergedClient = c
+		return c.Clusters.Get(ctx, clusterUUID)
+	})
 }
 
 func (client *nutanixClient) ListAllCluster(ctx context.Context) ([]clusterModels.Cluster, error) {
-	return client.convergedClient.Clusters.List(ctx)
+	return convergedV4.RetryOnStale(client.convergedClient, func(c *convergedV4.Client) ([]clusterModels.Cluster, error) {
+		client.convergedClient = c
+		return c.Clusters.List(ctx)
+	})
 }
 
 func (client *nutanixClient) GetCategory(ctx context.Context, categoryUUID string) (*prismModels.Category, error) {
-	return client.convergedClient.Categories.Get(ctx, categoryUUID)
+	return convergedV4.RetryOnStale(client.convergedClient, func(c *convergedV4.Client) (*prismModels.Category, error) {
+		client.convergedClient = c
+		return c.Categories.Get(ctx, categoryUUID)
+	})
 }
 
 func (client *nutanixClient) GetClusterHost(ctx context.Context, clusterUuid string, hostUUID string) (*clusterModels.Host, error) {
-	return client.convergedClient.Clusters.GetClusterHost(ctx, clusterUuid, hostUUID)
+	return convergedV4.RetryOnStale(client.convergedClient, func(c *convergedV4.Client) (*clusterModels.Host, error) {
+		client.convergedClient = c
+		return c.Clusters.GetClusterHost(ctx, clusterUuid, hostUUID)
+	})
 }
