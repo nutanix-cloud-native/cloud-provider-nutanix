@@ -41,6 +41,7 @@ const (
 	MockSecondaryIP2       = "3.3.3.3"
 	MockCustomProviderID   = "custom-provider-uuid-1234"
 	MockMetroNodeGroupName = "mock-metro-group"
+	MockMetroPreferredPE   = "mock-native-pe"
 
 	MockNodeNameVMNotExisting = "mock-node-no-vm-exists"
 	MockNodeNameNoSystemUUID  = "mock-node-no-system-uuid"

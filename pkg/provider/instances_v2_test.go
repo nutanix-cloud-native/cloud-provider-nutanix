@@ -288,6 +288,25 @@ var _ = Describe("Test InstancesV2", func() { // nolint:typecheck
 			Expect(err).ToNot(HaveOccurred())
 			Expect(updatedNode.Labels).ToNot(HaveKey(constants.MetroNodeGroupLabel))
 		})
+
+		It("[TopologyDiscovery: Prism] should use metro-preferred-pe as zone when present", func() {
+			node := mockEnvironment.GetNode(mock.MockVMNameMetro)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameMetro)
+			cluster := mockEnvironment.GetCluster(ctx, mock.MockCluster)
+			i.nutanixManager.config = prismTopologyConfig
+			metadata, err := i.InstanceMetadata(ctx, node)
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(*cluster.Name).NotTo(Equal(mock.MockMetroPreferredPE))
+			mock.ValidateInstanceMetadata(metadata, vm, mock.MockPrismCentral, mock.MockMetroPreferredPE)
+		})
+
+		It("[TopologyDiscovery: Categories] should use metro-preferred-pe as zone when present", func() {
+			node := mockEnvironment.GetNode(mock.MockVMNameMetro)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameMetro)
+			metadata, err := i.InstanceMetadata(ctx, node)
+			Expect(err).ShouldNot(HaveOccurred())
+			mock.ValidateInstanceMetadata(metadata, vm, "", mock.MockMetroPreferredPE)
+		})
 	})
 
 	Context("Test NewInstancesV2", func() {

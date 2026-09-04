@@ -601,6 +601,14 @@ func (n *nutanixManager) getTopologyInfo(ctx context.Context, nutanixClient inte
 		return nil, fmt.Errorf("unsupported topology discovery type: %s", topologyDiscovery.Type)
 	}
 
+	// Metro VMs are stamped by CAPX with metro-preferred-pe (native/home PE).
+	// Prefer that over the PE the VM currently occupies so Kubernetes zone stays
+	// stable across metro failover and failback.
+	if preferredPE := getVMCustomAttributeValue(vm, constants.MetroPreferredPEAttributeKey); preferredPE != "" {
+		klog.V(1).Infof("using metro preferred PE %q as zone (discovered zone was %q)", preferredPE, topologyInfo.Zone) //nolint:typecheck
+		topologyInfo.Zone = preferredPE
+	}
+
 	// workaround for bug NCN-110986
 	// The Region and Zone values are used by the upstream to set these label values:
 	// topology.kubernetes.io/region and topology.kubernetes.io/zone
