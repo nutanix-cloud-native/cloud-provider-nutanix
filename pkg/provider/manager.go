@@ -601,12 +601,12 @@ func (n *nutanixManager) getTopologyInfo(ctx context.Context, nutanixClient inte
 		return nil, fmt.Errorf("unsupported topology discovery type: %s", topologyDiscovery.Type)
 	}
 
-	// Metro VMs are stamped by CAPX with metro-zone-name (NutanixMetro or
-	// NutanixMetroSite object name). Prefer that over the PE the VM currently
-	// occupies so Kubernetes zone matches the CAPI failure-domain identity.
-	if metroZone := getVMCustomAttributeValue(vm, constants.MetroZoneNameAttributeKey); metroZone != "" {
-		klog.V(1).Infof("using metro zone name %q as zone (discovered zone was %q)", metroZone, topologyInfo.Zone) //nolint:typecheck
-		topologyInfo.Zone = metroZone
+	// VMs are stamped by CAPX with failure-domain set to the full CAPI
+	// Machine.spec.failureDomain. Prefer that over
+	// the PE the VM currently occupies so Kubernetes zone matches the failure-domain identity.
+	if failureDomain := getVMCustomAttributeValue(vm, constants.FailureDomainAttributeKey); failureDomain != "" {
+		klog.V(1).Infof("using failure-domain %q as zone (discovered zone was %q)", failureDomain, topologyInfo.Zone) //nolint:typecheck
+		topologyInfo.Zone = failureDomain
 	}
 
 	// workaround for bug NCN-110986
