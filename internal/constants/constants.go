@@ -33,10 +33,7 @@ const (
 	CustomHostNameLabel            string = "nutanix.com/prism-host-name"
 	MetroNodeGroupLabel            string = "nutanix.com/metro-site-group"
 	MetroNodeGroupNameAttributeKey string = "metro-node-group-name"
-	// MetroPreferredPEAttributeKey is the VM custom attribute CAPX sets to the
-	// metro native/home Prism Element. CCM uses it as topology.kubernetes.io/zone
-	// so the zone stays stable across PE failover and failback.
-	MetroPreferredPEAttributeKey string = "metro-preferred-pe"
+	MetroZoneNameAttributeKey      string = "metro-zone-name"
 
 	PrismCentralService string = "PRISM_CENTRAL"
 )

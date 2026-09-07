@@ -203,7 +203,7 @@ func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockE
 		host,
 		[]string{
 			constants.MetroNodeGroupNameAttributeKey + ":" + MockMetroNodeGroupName,
-			constants.MetroPreferredPEAttributeKey + ":" + MockMetroPreferredPE,
+			constants.MetroZoneNameAttributeKey + ":" + MockMetroZoneName,
 			"otherKey:otherValue",
 		},
 	)
