@@ -201,7 +201,11 @@ func CreateMockEnvironment(ctx context.Context, kClient *fake.Clientset) (*MockE
 		MockVMMetroUUID,
 		cluster,
 		host,
-		[]string{constants.MetroNodeGroupNameAttributeKey + ":" + MockMetroNodeGroupName, "otherKey:otherValue"},
+		[]string{
+			constants.MetroNodeGroupNameAttributeKey + ":" + MockMetroNodeGroupName,
+			constants.FailureDomainAttributeKey + ":" + MockFailureDomain,
+			"otherKey:otherValue",
+		},
 	)
 	metroNode, err := createNodeForVM(ctx, kClient, metroVM)
 	if err != nil {

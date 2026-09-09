@@ -41,6 +41,10 @@ const (
 	MockSecondaryIP2       = "3.3.3.3"
 	MockCustomProviderID   = "custom-provider-uuid-1234"
 	MockMetroNodeGroupName = "mock-metro-group"
+	// MockFailureDomain is the full CAPI Machine.spec.failureDomain stamped by CAPX.
+	MockFailureDomain = "NutanixMetro/mock-metro"
+	// MockFailureDomainZone is MockFailureDomain after SanitizeK8sLabelValue (/ -> _).
+	MockFailureDomainZone = "NutanixMetro_mock-metro"
 
 	MockNodeNameVMNotExisting = "mock-node-no-vm-exists"
 	MockNodeNameNoSystemUUID  = "mock-node-no-system-uuid"

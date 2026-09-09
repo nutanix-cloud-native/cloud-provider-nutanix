@@ -288,6 +288,25 @@ var _ = Describe("Test InstancesV2", func() { // nolint:typecheck
 			Expect(err).ToNot(HaveOccurred())
 			Expect(updatedNode.Labels).ToNot(HaveKey(constants.MetroNodeGroupLabel))
 		})
+
+		It("[TopologyDiscovery: Prism] should use failure-domain as zone when present", func() {
+			node := mockEnvironment.GetNode(mock.MockVMNameMetro)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameMetro)
+			cluster := mockEnvironment.GetCluster(ctx, mock.MockCluster)
+			i.nutanixManager.config = prismTopologyConfig
+			metadata, err := i.InstanceMetadata(ctx, node)
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(*cluster.Name).NotTo(Equal(mock.MockFailureDomainZone))
+			mock.ValidateInstanceMetadata(metadata, vm, mock.MockPrismCentral, mock.MockFailureDomainZone)
+		})
+
+		It("[TopologyDiscovery: Categories] should use failure-domain as zone when present", func() {
+			node := mockEnvironment.GetNode(mock.MockVMNameMetro)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameMetro)
+			metadata, err := i.InstanceMetadata(ctx, node)
+			Expect(err).ShouldNot(HaveOccurred())
+			mock.ValidateInstanceMetadata(metadata, vm, "", mock.MockFailureDomainZone)
+		})
 	})
 
 	Context("Test NewInstancesV2", func() {
