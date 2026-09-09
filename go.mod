@@ -6,7 +6,7 @@ toolchain go1.26.4
 
 require (
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/nutanix-cloud-native/prism-go-client v0.6.5
+	github.com/nutanix-cloud-native/prism-go-client v0.6.7-0.20260902145854-5bce56366356
 	github.com/onsi/ginkgo/v2 v2.28.0
 	github.com/onsi/gomega v1.39.1
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba
@@ -163,3 +163,6 @@ replace go.mongodb.org/mongo-driver => go.mongodb.org/mongo-driver v1.17.9
 replace github.com/moby/spdystream => github.com/moby/spdystream v0.5.1
 
 replace github.com/yuin/goldmark => github.com/yuin/goldmark v1.8.2
+
+// Temporary pin to issues/ncn-116866 (RetryOnStale / stale client recovery) until released.
+replace github.com/nutanix-cloud-native/prism-go-client => github.com/nutanix-cloud-native/prism-go-client v0.6.7-0.20260902145854-5bce56366356
