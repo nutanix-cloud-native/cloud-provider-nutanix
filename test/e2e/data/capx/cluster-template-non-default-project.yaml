@@ -599,7 +599,9 @@ spec:
       image:
         name: ${NUTANIX_MACHINE_TEMPLATE_IMAGE_NAME}
         type: name
-      project: ${NUTANIX_MACHINE_TEMPLATE_PROJECT=null}
+      project:
+        type: name
+        name: ${NUTANIX_PC_PROJECT}
       memorySize: ${NUTANIX_MACHINE_MEMORY_SIZE=4Gi}
       providerID: nutanix://${CLUSTER_NAME}-m1
       subnet:

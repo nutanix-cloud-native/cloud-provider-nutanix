@@ -27,13 +27,20 @@ const (
 	PoweredOffState string = "OFF"
 	PoweredOnState  string = "ON"
 
-	CustomPEUUIDLabel              string = "nutanix.com/prism-element-uuid"
-	CustomPENameLabel              string = "nutanix.com/prism-element-name"
-	CustomHostUUIDLabel            string = "nutanix.com/prism-host-uuid"
-	CustomHostNameLabel            string = "nutanix.com/prism-host-name"
+	PEUUIDLabel                    string = "nutanix.com/prism-element-uuid"
+	PENameLabel                    string = "nutanix.com/prism-element-name"
+	HostUUIDLabel                  string = "nutanix.com/prism-host-uuid"
+	HostNameLabel                  string = "nutanix.com/prism-host-name"
 	MetroNodeGroupLabel            string = "nutanix.com/metro-site-group"
 	MetroNodeGroupNameAttributeKey string = "metro-node-group-name"
 	FailureDomainAttributeKey      string = "failure-domain"
 
-	PrismCentralService string = "PRISM_CENTRAL"
+	ProjectUUIDLabel       string = "nutanix.com/project-uuid"
+	ResourceGroupUUIDLabel string = "nutanix.com/resource-group-uuid"
+	PrismCentralService    string = "PRISM_CENTRAL"
+
+	// ResourceGroupClusterNameCapabilityKey is the capability name on a resource group's
+	// placement target that carries the target cluster's name. Project-scoped Prism clients
+	// (PC 7.6+) cannot call cluster-wide APIs, so this is how PE name is resolved for them.
+	ResourceGroupClusterNameCapabilityKey string = "cluster_name"
 )

@@ -18,23 +18,25 @@ limitations under the License.
 package provider
 
 import (
+	"context"
 	"os"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-	"k8s.io/client-go/informers"
-	"k8s.io/client-go/kubernetes/fake"
-
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/testing/mock"
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
 	convergedV4 "github.com/nutanix-cloud-native/prism-go-client/converged/v4"
 	"github.com/nutanix-cloud-native/prism-go-client/environment/credentials"
 	"github.com/nutanix-cloud-native/prism-go-client/environment/providers/local"
 	prismclientv4 "github.com/nutanix-cloud-native/prism-go-client/v4"
-	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
-	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/testing/mock"
-	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
+	multidomainModels "github.com/nutanix/ntnx-api-golang-clients/multidomain-go-client/v4/models/multidomain/v4/config"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/informers"
+	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/utils/ptr"
 )
 
 func unsetEnv(key string) {
@@ -161,6 +163,25 @@ var _ = Describe("Test Client", func() { // nolint:typecheck
 		})
 
 		It("should return a client when client creation succeeds", func() { // nolint:typecheck
+			previousGetProjectScopeAndDefaultProjectFn := getProjectScopeAndDefaultProjectFn
+			previousGetPCVersionFn := getPCVersionFn
+			getProjectScopeAndDefaultProjectFn = func(ctx context.Context, convergedClient *convergedV4.Client) (bool, *multidomainModels.Project, error) {
+				if os.Getenv("NUTANIX_ENDPOINT") == "prism.nutanix.com" {
+					return false, &multidomainModels.Project{ExtId: ptr.To("default-project-id")}, nil
+				}
+				return previousGetProjectScopeAndDefaultProjectFn(ctx, convergedClient)
+			}
+			getPCVersionFn = func(ctx context.Context, convergedClient *convergedV4.Client) (string, error) {
+				if os.Getenv("NUTANIX_ENDPOINT") == "prism.nutanix.com" {
+					return "pc.7.6.0.0", nil
+				}
+				return previousGetPCVersionFn(ctx, convergedClient)
+			}
+			defer func() {
+				getProjectScopeAndDefaultProjectFn = previousGetProjectScopeAndDefaultProjectFn
+				getPCVersionFn = previousGetPCVersionFn
+			}()
+
 			p := local.NewProvider()
 			err := os.Setenv("NUTANIX_ENDPOINT", "prism.nutanix.com")
 			Expect(err).To(BeNil())
@@ -179,6 +200,143 @@ var _ = Describe("Test Client", func() { // nolint:typecheck
 			client, err := nClient.Get()
 			Expect(err).To(BeNil())
 			Expect(client).ToNot(BeNil())
+		})
+
+		It("should skip project checks when pc version is less than 7.6", func() { // nolint:typecheck
+			previousIsProjectScopedFn := isProjectScopedFn
+			previousGetDefaultProjectFn := getDefaultProjectFn
+			previousGetProjectScopeAndDefaultProjectFn := getProjectScopeAndDefaultProjectFn
+			previousGetPCVersionFn := getPCVersionFn
+			isProjectScopedFn = func(ctx context.Context, convergedClient *convergedV4.Client) (bool, error) {
+				Fail("isProjectScopedFn should not be called for PC < 7.6")
+				return false, nil
+			}
+			getDefaultProjectFn = func(ctx context.Context, convergedClient *convergedV4.Client) (*multidomainModels.Project, error) {
+				Fail("getDefaultProjectFn should not be called for PC < 7.6")
+				return nil, nil
+			}
+			getProjectScopeAndDefaultProjectFn = func(ctx context.Context, convergedClient *convergedV4.Client) (bool, *multidomainModels.Project, error) {
+				Fail("getProjectScopeAndDefaultProjectFn should not be called for PC < 7.6")
+				return false, nil, nil
+			}
+			getPCVersionFn = func(ctx context.Context, convergedClient *convergedV4.Client) (string, error) {
+				return "pc.7.5.0.1", nil
+			}
+			defer func() {
+				isProjectScopedFn = previousIsProjectScopedFn
+				getDefaultProjectFn = previousGetDefaultProjectFn
+				getProjectScopeAndDefaultProjectFn = previousGetProjectScopeAndDefaultProjectFn
+				getPCVersionFn = previousGetPCVersionFn
+			}()
+
+			p := local.NewProvider()
+			err := os.Setenv("NUTANIX_ENDPOINT", "prism.nutanix.com")
+			Expect(err).To(BeNil())
+			defer unsetEnv("NUTANIX_ENDPOINT")
+
+			err = os.Setenv("NUTANIX_USERNAME", "username")
+			Expect(err).To(BeNil())
+			defer unsetEnv("NUTANIX_USERNAME")
+
+			err = os.Setenv("NUTANIX_PASSWORD", "password")
+			Expect(err).To(BeNil())
+			defer unsetEnv("NUTANIX_PASSWORD")
+
+			nClient.env = p
+			nClient.clientCache = convergedV4.NewClientCache(prismclientv4.WithSessionAuth(false))
+			client, err := nClient.Get()
+			Expect(err).To(BeNil())
+			Expect(client).ToNot(BeNil())
+			Expect(client.IsProjectScoped(context.Background())).To(BeFalse())
+			Expect(client.GetDefaultProjectExtId(context.Background())).To(BeNil())
+		})
+
+		It("should set zero UUID default project when project scoped on PC >= 7.6", func() {
+			previousGetProjectScopeAndDefaultProjectFn := getProjectScopeAndDefaultProjectFn
+			previousGetPCVersionFn := getPCVersionFn
+			getProjectScopeAndDefaultProjectFn = func(ctx context.Context, convergedClient *convergedV4.Client) (bool, *multidomainModels.Project, error) {
+				return true, &multidomainModels.Project{ExtId: ptr.To(zeroUUID)}, nil
+			}
+			getPCVersionFn = func(ctx context.Context, convergedClient *convergedV4.Client) (string, error) {
+				return "pc.7.6.0.0", nil
+			}
+			defer func() {
+				getProjectScopeAndDefaultProjectFn = previousGetProjectScopeAndDefaultProjectFn
+				getPCVersionFn = previousGetPCVersionFn
+			}()
+
+			p := local.NewProvider()
+			err := os.Setenv("NUTANIX_ENDPOINT", "prism.nutanix.com")
+			Expect(err).To(BeNil())
+			defer unsetEnv("NUTANIX_ENDPOINT")
+
+			err = os.Setenv("NUTANIX_USERNAME", "username")
+			Expect(err).To(BeNil())
+			defer unsetEnv("NUTANIX_USERNAME")
+
+			err = os.Setenv("NUTANIX_PASSWORD", "password")
+			Expect(err).To(BeNil())
+			defer unsetEnv("NUTANIX_PASSWORD")
+
+			nClient.env = p
+			nClient.clientCache = convergedV4.NewClientCache(prismclientv4.WithSessionAuth(false))
+			client, err := nClient.Get()
+			Expect(err).To(BeNil())
+			Expect(client).ToNot(BeNil())
+			Expect(client.IsProjectScoped(context.Background())).To(BeTrue())
+			Expect(client.GetDefaultProjectExtId(context.Background())).ToNot(BeNil())
+			Expect(*client.GetDefaultProjectExtId(context.Background())).To(Equal(zeroUUID))
+		})
+
+		It("should refresh project scope and default project on each call", func() {
+			previousGetProjectScopeAndDefaultProjectFn := getProjectScopeAndDefaultProjectFn
+			previousGetPCVersionFn := getPCVersionFn
+
+			projectScoped := false
+			getProjectScopeAndDefaultProjectFn = func(ctx context.Context, convergedClient *convergedV4.Client) (bool, *multidomainModels.Project, error) {
+				if projectScoped {
+					return true, &multidomainModels.Project{ExtId: ptr.To(zeroUUID)}, nil
+				}
+				return false, &multidomainModels.Project{ExtId: ptr.To("default-project-id")}, nil
+			}
+			getPCVersionFn = func(ctx context.Context, convergedClient *convergedV4.Client) (string, error) {
+				return "pc.7.6.0.0", nil
+			}
+			defer func() {
+				getProjectScopeAndDefaultProjectFn = previousGetProjectScopeAndDefaultProjectFn
+				getPCVersionFn = previousGetPCVersionFn
+			}()
+
+			p := local.NewProvider()
+			err := os.Setenv("NUTANIX_ENDPOINT", "prism.nutanix.com")
+			Expect(err).To(BeNil())
+			defer unsetEnv("NUTANIX_ENDPOINT")
+
+			err = os.Setenv("NUTANIX_USERNAME", "username")
+			Expect(err).To(BeNil())
+			defer unsetEnv("NUTANIX_USERNAME")
+
+			err = os.Setenv("NUTANIX_PASSWORD", "password")
+			Expect(err).To(BeNil())
+			defer unsetEnv("NUTANIX_PASSWORD")
+
+			nClient.env = p
+			nClient.clientCache = convergedV4.NewClientCache(prismclientv4.WithSessionAuth(false))
+
+			client, err := nClient.Get()
+			Expect(err).To(BeNil())
+			Expect(client).ToNot(BeNil())
+
+			Expect(client.IsProjectScoped(context.Background())).To(BeFalse())
+			Expect(*client.GetDefaultProjectExtId(context.Background())).To(Equal("default-project-id"))
+
+			projectScoped = true
+			Expect(client.IsProjectScoped(context.Background())).To(BeTrue())
+			Expect(*client.GetDefaultProjectExtId(context.Background())).To(Equal(zeroUUID))
+
+			projectScoped = false
+			Expect(client.IsProjectScoped(context.Background())).To(BeFalse())
+			Expect(*client.GetDefaultProjectExtId(context.Background())).To(Equal("default-project-id"))
 		})
 	})
 

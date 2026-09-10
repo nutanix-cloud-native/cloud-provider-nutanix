@@ -40,7 +40,7 @@ import (
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
 )
 
-func getDefaultVM(vmName string, vmUUID string, cluster *clusterModels.Cluster, host *clusterModels.Host) *vmmModels.Vm {
+func getDefaultVM(vmName string, vmIdentifier string, cluster *clusterModels.Cluster, host *clusterModels.Host) *vmmModels.Vm {
 	nic := vmmModels.NewNic()
 	nicNetInfo := vmmModels.NewVirtualEthernetNicNetworkInfo()
 
@@ -63,7 +63,8 @@ func getDefaultVM(vmName string, vmUUID string, cluster *clusterModels.Cluster, 
 	}
 
 	vm := &vmmModels.Vm{
-		ExtId:      ptr.To(vmUUID),
+		ExtId:      ptr.To(vmIdentifier),
+		BiosUuid:   ptr.To(vmIdentifier),
 		Categories: make([]vmmModels.CategoryReference, 0),
 		PowerState: vmmModels.POWERSTATE_ON.Ref(),
 		Name:       ptr.To(vmName),
@@ -82,7 +83,7 @@ func getDefaultVM(vmName string, vmUUID string, cluster *clusterModels.Cluster, 
 	return vm
 }
 
-func getDefaultVMWithDpOffload(vmName string, vmUUID string, cluster *clusterModels.Cluster, host *clusterModels.Host) *vmmModels.Vm {
+func getDefaultVMWithDpOffload(vmName string, vmIdentifier string, cluster *clusterModels.Cluster, host *clusterModels.Host) *vmmModels.Vm {
 	nic := vmmModels.NewNic()
 	nicNetInfo := vmmModels.NewDpOffloadNicNetworkInfo()
 
@@ -105,7 +106,8 @@ func getDefaultVMWithDpOffload(vmName string, vmUUID string, cluster *clusterMod
 	}
 
 	vm := &vmmModels.Vm{
-		ExtId:      ptr.To(vmUUID),
+		ExtId:      ptr.To(vmIdentifier),
+		BiosUuid:   ptr.To(vmIdentifier),
 		Categories: make([]vmmModels.CategoryReference, 0),
 		PowerState: vmmModels.POWERSTATE_ON.Ref(),
 		Name:       ptr.To(vmName),
@@ -124,7 +126,7 @@ func getDefaultVMWithDpOffload(vmName string, vmUUID string, cluster *clusterMod
 	return vm
 }
 
-func getDefaultVMWithSecondaryIPs(vmName string, vmUUID string, cluster *clusterModels.Cluster, host *clusterModels.Host) *vmmModels.Vm {
+func getDefaultVMWithSecondaryIPs(vmName string, vmIdentifier string, cluster *clusterModels.Cluster, host *clusterModels.Host) *vmmModels.Vm {
 	nic := vmmModels.NewNic()
 	nicNetInfo := vmmModels.NewVirtualEthernetNicNetworkInfo()
 
@@ -156,7 +158,8 @@ func getDefaultVMWithSecondaryIPs(vmName string, vmUUID string, cluster *cluster
 	}
 
 	vm := &vmmModels.Vm{
-		ExtId:      ptr.To(vmUUID),
+		ExtId:      ptr.To(vmIdentifier),
+		BiosUuid:   ptr.To(vmIdentifier),
 		Categories: make([]vmmModels.CategoryReference, 0),
 		PowerState: vmmModels.POWERSTATE_ON.Ref(),
 		Name:       ptr.To(vmName),
@@ -175,7 +178,7 @@ func getDefaultVMWithSecondaryIPs(vmName string, vmUUID string, cluster *cluster
 	return vm
 }
 
-func getDefaultVMWithCustomAttributes(vmName string, vmUUID string, cluster *clusterModels.Cluster, host *clusterModels.Host, customAttributes []string) *vmmModels.Vm {
+func getDefaultVMWithCustomAttributes(vmName string, vmIdentifier string, cluster *clusterModels.Cluster, host *clusterModels.Host, customAttributes []string) *vmmModels.Vm {
 	nic := vmmModels.NewNic()
 	nicNetInfo := vmmModels.NewVirtualEthernetNicNetworkInfo()
 
@@ -198,7 +201,8 @@ func getDefaultVMWithCustomAttributes(vmName string, vmUUID string, cluster *clu
 	}
 
 	vm := &vmmModels.Vm{
-		ExtId:            ptr.To(vmUUID),
+		ExtId:            ptr.To(vmIdentifier),
+		BiosUuid:         ptr.To(vmIdentifier),
 		Categories:       make([]vmmModels.CategoryReference, 0),
 		PowerState:       vmmModels.POWERSTATE_ON.Ref(),
 		Name:             ptr.To(vmName),
@@ -254,7 +258,7 @@ func createNodeForVM(ctx context.Context, kClient *fake.Clientset, vm *vmmModels
 
 		Status: v1.NodeStatus{
 			NodeInfo: v1.NodeSystemInfo{
-				SystemUUID: *vm.ExtId,
+				SystemUUID: *vm.BiosUuid,
 			},
 		},
 	}
@@ -267,11 +271,11 @@ func createNodeForVM(ctx context.Context, kClient *fake.Clientset, vm *vmmModels
 }
 
 func ValidateInstanceMetadata(metadata *cloudprovider.InstanceMetadata, vm *vmmModels.Vm, region, zone string) {
-	Expect(metadata).NotTo(BeNil())                                               // nolint:typecheck
-	Expect(metadata.InstanceType).To(Equal(constants.InstanceType))               // nolint:typecheck
-	Expect(metadata.ProviderID).To(Equal(fmt.Sprintf("nutanix://%s", *vm.ExtId))) // nolint:typecheck
-	Expect(metadata.Region).To(Equal(region))                                     // nolint:typecheck
-	Expect(metadata.Zone).To(Equal(zone))                                         // nolint:typecheck
+	Expect(metadata).NotTo(BeNil())                                                  // nolint:typecheck
+	Expect(metadata.InstanceType).To(Equal(constants.InstanceType))                  // nolint:typecheck
+	Expect(metadata.ProviderID).To(Equal(fmt.Sprintf("nutanix://%s", *vm.BiosUuid))) // nolint:typecheck
+	Expect(metadata.Region).To(Equal(region))                                        // nolint:typecheck
+	Expect(metadata.Zone).To(Equal(zone))                                            // nolint:typecheck
 }
 
 func GenerateMockConfig() config.Config {
@@ -297,12 +301,12 @@ func CheckAdditionalLabels(node *v1.Node, vm *vmmModels.Vm, cluster *clusterMode
 	Expect(node).ToNot(BeNil()) // nolint:typecheck
 
 	toMatchKeys := gstruct.Keys{
-		constants.CustomPEUUIDLabel: Equal(*vm.Cluster.ExtId), // nolint:typecheck
-		constants.CustomPENameLabel: Equal(*cluster.Name),     // nolint:typecheck
+		constants.PEUUIDLabel: Equal(*vm.Cluster.ExtId), // nolint:typecheck
+		constants.PENameLabel: Equal(*cluster.Name),     // nolint:typecheck
 	}
 	if host != nil && host.ExtId != nil && host.HostName != nil {
-		toMatchKeys[constants.CustomHostUUIDLabel] = Equal(*host.ExtId)    // nolint:typecheck
-		toMatchKeys[constants.CustomHostNameLabel] = Equal(*host.HostName) // nolint:typecheck
+		toMatchKeys[constants.HostUUIDLabel] = Equal(*host.ExtId)    // nolint:typecheck
+		toMatchKeys[constants.HostNameLabel] = Equal(*host.HostName) // nolint:typecheck
 	}
 
 	Expect(node.Labels).To(gstruct.MatchAllKeys(toMatchKeys)) // nolint:typecheck
