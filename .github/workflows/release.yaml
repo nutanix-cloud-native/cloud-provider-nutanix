@@ -17,11 +17,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install devbox
-        run: curl -fsSL https://get.jetpack.io/devbox | bash -s -- -f
+      # Install nix using DeterminateSystems/nix-installer-action if running on ARC runners
+      # This can be removed once jetify-com/devbox-install-action has a release that includes
+      # at least `DeterminateSystems/nix-installer-action@v19` which includes the fix in
+      # https://github.com/DeterminateSystems/nix-installer-action/issues/68
+      - name: Install Nix on self-hosted ARC runners
+        uses: DeterminateSystems/nix-installer-action@v20
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          logger: pretty
+          extra-conf: experimental-features = ca-derivations fetch-closure
 
-      - name: Install devbox deps
-        run: devbox install
+      - name: Install devbox
+        uses: jetify-com/devbox-install-action@v0.14.0
+        with:
+          enable-cache: "false"
+          skip-nix-installation: "true"
 
       - name: Install tools
         uses: redhat-actions/openshift-tools-installer@v1
