@@ -23,6 +23,10 @@ const (
 	MockRegion       = "mock-region"
 	MockZone         = "mock-zone"
 
+	// MockPrismCentralVersion defaults to a release that predates the BIOS UUID
+	// lookup API, so resolveVM exercises the legacy try-BIOS-then-fall-back path.
+	MockPrismCentralVersion = "7.5"
+
 	MockDefaultRegion = "region"
 	MockDefaultZone   = "zone"
 

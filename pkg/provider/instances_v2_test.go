@@ -19,8 +19,10 @@ package provider
 
 import (
 	"context"
+	"fmt"
 
 	clusterModels "github.com/nutanix/ntnx-api-golang-clients/clustermgmt-go-client/v4/models/clustermgmt/v4/config"
+	vmmModels "github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4/models/vmm/v4/ahv/config"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"go4.org/netipx"
@@ -29,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/utils/ptr"
 
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/testing/mock"
@@ -250,15 +253,50 @@ var _ = Describe("Test InstancesV2", func() { // nolint:typecheck
 			mock.CheckAdditionalLabels(updatedNode, vm, cluster, nil)
 		})
 
-		It("should not have any custom labels set if disabled", func() {
+		It("should not have host labels set if custom labeling is disabled", func() {
 			node := mockEnvironment.GetNode(mock.MockVMNamePoweredOn)
-			// Change config to disable custom labels
 			i.nutanixManager.config.EnableCustomLabeling = false
 			_, err = i.InstanceMetadata(ctx, node)
 			Expect(err).ShouldNot(HaveOccurred())
 			updatedNode, err := kClient.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
 			Expect(err).ToNot(HaveOccurred())
-			Expect(updatedNode.Labels).To(BeEmpty())
+			Expect(updatedNode.Labels).ToNot(HaveKey(constants.HostUUIDLabel))
+			Expect(updatedNode.Labels).ToNot(HaveKey(constants.HostNameLabel))
+			Expect(updatedNode.Labels).To(HaveKey(constants.PEUUIDLabel))
+			Expect(updatedNode.Labels).To(HaveKey(constants.PENameLabel))
+		})
+
+		It("should label project-scoped VMs from the resource group without calling cluster APIs, and skip host labels", func() {
+			node := mockEnvironment.GetNode(mock.MockVMNamePoweredOn)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
+			vm.Project = &vmmModels.ProjectReference{ExtId: ptr.To("project-1")}
+			// Category-based topology discovery calls GetCluster regardless of project scope;
+			// Prism topology discovery is the project-scope-aware path under test here.
+			i.nutanixManager.config = prismTopologyConfig
+
+			nClient, err := i.nutanixManager.nutanixClient.Get()
+			Expect(err).ToNot(HaveOccurred())
+			mockPrism := nClient.(*mock.MockPrism)
+			mockPrism.IsProjectScopedOverride = func(_ context.Context) bool {
+				return true
+			}
+			mockPrism.GetPrismCentralVersionOverride = func(_ context.Context) (string, error) {
+				return "7.6", nil
+			}
+			mockPrism.GetClusterOverride = func(_ context.Context, _ string) (*clusterModels.Cluster, error) {
+				return nil, fmt.Errorf("GetCluster must not be called for project-scoped clients")
+			}
+
+			_, err = i.InstanceMetadata(ctx, node)
+			Expect(err).ShouldNot(HaveOccurred())
+			updatedNode, err := kClient.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(updatedNode.Labels).To(HaveKeyWithValue(constants.PEUUIDLabel, mock.MockClusterUUID))
+			Expect(updatedNode.Labels).To(HaveKeyWithValue(constants.PENameLabel, mock.MockCluster))
+			Expect(updatedNode.Labels).To(HaveKeyWithValue(constants.ProjectUUIDLabel, "project-1"))
+			Expect(updatedNode.Labels).To(HaveKeyWithValue(constants.ResourceGroupUUIDLabel, "rg-1"))
+			Expect(updatedNode.Labels).ToNot(HaveKey(constants.HostUUIDLabel))
+			Expect(updatedNode.Labels).ToNot(HaveKey(constants.HostNameLabel))
 		})
 
 		It("should set the metro node-group label when the VM has the metro custom attribute", func() {
@@ -342,8 +380,11 @@ var _ = Describe("Test InstancesV2", func() { // nolint:typecheck
 
 		It("should skip InstanceMetadata for another-provider nodes", func() {
 			node := &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{Name: "another-provider-node"},
-				Spec:       v1.NodeSpec{ProviderID: "another-provider://1234"},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "another-provider-node",
+					Labels: map[string]string{"example.com/existing-label": "unchanged"},
+				},
+				Spec: v1.NodeSpec{ProviderID: "another-provider://1234"},
 				Status: v1.NodeStatus{
 					Addresses: []v1.NodeAddress{
 						{Type: v1.NodeInternalIP, Address: "10.10.10.10"},
@@ -357,6 +398,7 @@ var _ = Describe("Test InstancesV2", func() { // nolint:typecheck
 			Expect(metadata).ToNot(BeNil())
 			Expect(metadata.ProviderID).To(Equal(node.Spec.ProviderID))
 			Expect(metadata.NodeAddresses).To(Equal(node.Status.Addresses))
+			Expect(node.Labels).To(Equal(map[string]string{"example.com/existing-label": "unchanged"}))
 		})
 
 		It("should continue reconciling nutanix-managed nodes", func() {
