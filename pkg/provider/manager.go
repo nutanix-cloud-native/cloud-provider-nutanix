@@ -794,6 +794,23 @@ func (n *nutanixManager) stripNutanixIDFromProviderID(providerID string) string 
 	return strings.TrimPrefix(providerID, fmt.Sprintf("%s://", constants.ProviderName))
 }
 
+const (
+	metroFailureDomainPrefix     = "NutanixMetro/"
+	metroSiteFailureDomainPrefix = "NutanixMetroSite/"
+)
+
+// useFailureDomainAsZone reports whether a CAPX-stamped failure-domain custom
+// attribute should replace the discovered Prism or category zone.
+//
+// Metro and MetroSite failure domains are the Kubernetes zone because a VM can
+// occupy either PE in the pair. Traditional PE failure domains must keep the
+// discovered zone so upgrades do not rewrite topology.kubernetes.io/zone out
+// from under volumes created against the Prism Element name.
+func useFailureDomainAsZone(failureDomain string) bool {
+	return strings.HasPrefix(failureDomain, metroFailureDomainPrefix) ||
+		strings.HasPrefix(failureDomain, metroSiteFailureDomainPrefix)
+}
+
 func (n *nutanixManager) getTopologyInfo(ctx context.Context, nutanixClient interfaces.Prism, vm *vmmModels.Vm) (*config.TopologyInfo, error) {
 	topologyDiscovery := n.config.TopologyDiscovery
 	topologyInfo := &config.TopologyInfo{}
@@ -811,10 +828,13 @@ func (n *nutanixManager) getTopologyInfo(ctx context.Context, nutanixClient inte
 		return nil, fmt.Errorf("unsupported topology discovery type: %s", topologyDiscovery.Type)
 	}
 
-	// VMs are stamped by CAPX with failure-domain set to the full CAPI
-	// Machine.spec.failureDomain. Prefer that over
-	// the PE the VM currently occupies so Kubernetes zone matches the failure-domain identity.
-	if failureDomain := getVMCustomAttributeValue(vm, constants.FailureDomainAttributeKey); failureDomain != "" {
+	// CAPX stamps failure-domain with the full Machine.spec.failureDomain.
+	// Only Metro and MetroSite domains replace the discovered zone: those names
+	// stay stable when a VM fails over between PEs. Traditional PE failure
+	// domains (fd-pe-<id>, fd0, and similar) keep the Prism or category zone.
+	// Rewriting them changes topology.kubernetes.io/zone on upgrade while
+	// existing volumes still require the previous value.
+	if failureDomain := getVMCustomAttributeValue(vm, constants.FailureDomainAttributeKey); useFailureDomainAsZone(failureDomain) {
 		klog.V(1).Infof("using failure-domain %q as zone (discovered zone was %q)", failureDomain, topologyInfo.Zone) //nolint:typecheck
 		topologyInfo.Zone = failureDomain
 	}
