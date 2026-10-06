@@ -374,3 +374,27 @@ func TestSanitizeK8sLabelValue(t *testing.T) {
 		})
 	}
 }
+
+func TestUseFailureDomainAsZone(t *testing.T) {
+	tests := []struct {
+		name          string
+		failureDomain string
+		want          bool
+	}{
+		{name: "metro failure domain", failureDomain: "NutanixMetro/metro-ab", want: true},
+		{name: "metro site failure domain", failureDomain: "NutanixMetroSite/site-a", want: true},
+		{name: "prefix-only metro", failureDomain: "NutanixMetro/", want: true},
+		{name: "prefix-only metro site", failureDomain: "NutanixMetroSite/", want: true},
+		{name: "traditional pe failure domain", failureDomain: "fd-pe-6d20", want: false},
+		{name: "short traditional failure domain", failureDomain: "fd0", want: false},
+		{name: "metro name without separator", failureDomain: "NutanixMetro", want: false},
+		{name: "empty", failureDomain: "", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := useFailureDomainAsZone(tt.failureDomain); got != tt.want {
+				t.Errorf("useFailureDomainAsZone(%q) = %v, want %v", tt.failureDomain, got, tt.want)
+			}
+		})
+	}
+}

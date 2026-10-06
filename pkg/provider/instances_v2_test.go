@@ -345,6 +345,26 @@ var _ = Describe("Test InstancesV2", func() { // nolint:typecheck
 			Expect(err).ShouldNot(HaveOccurred())
 			mock.ValidateInstanceMetadata(metadata, vm, "", mock.MockFailureDomainZone)
 		})
+
+		It("[TopologyDiscovery: Prism] should keep the PE zone for a traditional failure domain", func() {
+			node := mockEnvironment.GetNode(mock.MockVMNamePoweredOn)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNamePoweredOn)
+			vm.CustomAttributes = []string{constants.FailureDomainAttributeKey + ":fd-pe-6d20"}
+			cluster := mockEnvironment.GetCluster(ctx, mock.MockCluster)
+			i.nutanixManager.config = prismTopologyConfig
+			metadata, err := i.InstanceMetadata(ctx, node)
+			Expect(err).ShouldNot(HaveOccurred())
+			mock.ValidateInstanceMetadata(metadata, vm, mock.MockPrismCentral, *cluster.Name)
+		})
+
+		It("[TopologyDiscovery: Categories] should keep the category zone for a traditional failure domain", func() {
+			node := mockEnvironment.GetNode(mock.MockVMNameCategories)
+			vm := mockEnvironment.GetVM(ctx, mock.MockVMNameCategories)
+			vm.CustomAttributes = []string{constants.FailureDomainAttributeKey + ":fd-pe-6d20"}
+			metadata, err := i.InstanceMetadata(ctx, node)
+			Expect(err).ShouldNot(HaveOccurred())
+			mock.ValidateInstanceMetadata(metadata, vm, mock.MockRegion, mock.MockZone)
+		})
 	})
 
 	Context("Test NewInstancesV2", func() {
