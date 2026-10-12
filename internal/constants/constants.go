@@ -43,4 +43,9 @@ const (
 	// placement target that carries the target cluster's name. Project-scoped Prism clients
 	// (PC 7.6+) cannot call cluster-wide APIs, so this is how PE name is resolved for them.
 	ResourceGroupClusterNameCapabilityKey string = "cluster_name"
+
+	// LoadBalancerStrategyAnnotation is set on a Service to override the CCM
+	// default LoadBalancer strategy for that Service. The value must be a
+	// registered strategy name (e.g. "None").
+	LoadBalancerStrategyAnnotation string = "ccm.nutanix.com/load-balancer-strategy"
 )

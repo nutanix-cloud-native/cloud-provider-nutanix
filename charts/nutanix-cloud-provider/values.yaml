@@ -35,6 +35,18 @@ enableCustomLabeling: false
 # IP addresses to ignore when discovering node addresses from Prism Central
 ignoredNodeIPs: []
 
+# Service LoadBalancer controller settings
+loadBalancer:
+  # enabled controls whether the cloud-provider Service (LoadBalancer) controller
+  # runs. When false, the controller is disabled at runtime (--controllers=*,-service),
+  # reproducing the pre-strategy behaviour where it never ran.
+  enabled: true
+  # defaultStrategy is applied to Services without the
+  # ccm.nutanix.com/load-balancer-strategy override annotation.
+  # "None" is the do-nothing strategy: MetalLB (CAREN static addressRanges) keeps
+  # owning IP allocation, status, and advertisement.
+  defaultStrategy: "None"
+
 topologyDiscovery:
   # Define how Topology will be discovered
   # type can be Prism or Categories

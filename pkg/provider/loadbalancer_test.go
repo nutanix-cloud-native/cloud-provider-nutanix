@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
+	cloudprovider "k8s.io/cloud-provider"
 
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/testing/mock"
 )
@@ -54,30 +55,27 @@ var _ = Describe("Test Loadbalancer", func() { // nolint:typecheck
 		})
 	})
 
+	// With the default "None" (do-nothing) strategy, Ensure/Update delegate to an
+	// external backend (MetalLB) and therefore return ImplementedElsewhere.
 	Context("Test EnsureLoadBalancer", func() {
-		It("should not return error", func() {
+		It("should delegate to the external backend (ImplementedElsewhere)", func() {
 			lbStatus, err := ntnxCloud.EnsureLoadBalancer(ctx, mock.MockCluster, &v1.Service{}, []*v1.Node{})
 			Expect(lbStatus).To(BeNil())
-			Expect(err).ShouldNot(HaveOccurred())
+			Expect(err).To(MatchError(cloudprovider.ImplementedElsewhere))
 		})
 	})
 
 	Context("Test UpdateLoadBalancer", func() {
-		It("should not return error", func() {
+		It("should delegate to the external backend (ImplementedElsewhere)", func() {
 			err := ntnxCloud.UpdateLoadBalancer(ctx, mock.MockCluster, &v1.Service{}, []*v1.Node{})
-			Expect(err).ShouldNot(HaveOccurred())
+			Expect(err).To(MatchError(cloudprovider.ImplementedElsewhere))
 		})
 	})
 
-	Context("Test UpdateLoadBalancer", func() {
-		It("not return error", func() {
-			err := ntnxCloud.UpdateLoadBalancer(ctx, mock.MockCluster, &v1.Service{}, []*v1.Node{})
-			Expect(err).ShouldNot(HaveOccurred())
-		})
-	})
-
-	Context("Test EnsureLoadNalancerDeleted", func() {
-		It("not return error", func() {
+	// EnsureLoadBalancerDeleted must be a safe no-op (never ImplementedElsewhere)
+	// so the Service controller can finish teardown and drop the finalizer.
+	Context("Test EnsureLoadBalancerDeleted", func() {
+		It("should be a no-op and not return error", func() {
 			err := ntnxCloud.EnsureLoadBalancerDeleted(ctx, mock.MockCluster, &v1.Service{})
 			Expect(err).ShouldNot(HaveOccurred())
 		})

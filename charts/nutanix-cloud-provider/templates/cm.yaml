@@ -24,6 +24,9 @@ data:
 
       },
       "enableCustomLabeling": {{ .Values.enableCustomLabeling }},
+      "loadBalancer": {
+        "defaultStrategy": {{ .Values.loadBalancer.defaultStrategy | default "None" | toJson }}
+      },
 {{- with .Values.ignoredNodeIPs }}
       "ignoredNodeIPs": [ {{ range $idx, $ip := . }}{{ if $idx }}, {{ end }}{{ $ip | toJson }}{{ end }} ],
 {{- end }}

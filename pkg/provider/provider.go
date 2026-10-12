@@ -26,6 +26,7 @@ import (
 
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/loadbalancer"
 )
 
 type NtnxCloud struct {
@@ -35,6 +36,7 @@ type NtnxCloud struct {
 	config      config.Config
 	manager     *nutanixManager
 	instancesV2 cloudprovider.InstancesV2
+	lbResolver  *loadbalancer.Resolver
 }
 
 func init() {
@@ -60,11 +62,18 @@ func newNtnxCloud(configReader io.Reader) (cloudprovider.Interface, error) {
 		return nil, err
 	}
 
+	lbResolver, err := loadbalancer.NewResolver(nutanixConfig.LoadBalancer.DefaultStrategy)
+	if err != nil {
+		return nil, fmt.Errorf("error configuring load balancer strategies: %v", err)
+	}
+	klog.Infof("Load balancer default strategy: %q", lbResolver.DefaultStrategy())
+
 	ntnx := &NtnxCloud{
 		name:        constants.ProviderName,
 		config:      nutanixConfig,
 		manager:     nutanixManager,
 		instancesV2: newInstancesV2(nutanixManager),
+		lbResolver:  lbResolver,
 	}
 
 	return ntnx, err
@@ -95,7 +104,7 @@ func (nc *NtnxCloud) HasClusterID() bool {
 }
 
 func (nc *NtnxCloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
-	return nc, false
+	return nc, true
 }
 
 func (nc *NtnxCloud) Routes() (cloudprovider.Routes, bool) {

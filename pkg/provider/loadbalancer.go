@@ -20,41 +20,78 @@ import (
 	"context"
 
 	v1 "k8s.io/api/core/v1"
+
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/loadbalancer"
 )
 
-// get the status from the service Info.
-// returning an error - keeps the intent alive
-// bool indicates if an lb was found or not
-func (nc *NtnxCloud) GetLoadBalancer(ct context.Context, clusterName string, service *v1.Service) (
-	*v1.LoadBalancerStatus, bool, error,
-) {
-	return nil, false, nil
+// strategyFor resolves the LoadBalancer strategy for a Service: the strategy
+// named by the Service override annotation if present, otherwise the configured
+// default. It tolerates a nil resolver (e.g. a zero-value NtnxCloud in tests) by
+// falling back to the built-in default resolver (None).
+func (nc *NtnxCloud) strategyFor(service *v1.Service) (loadbalancer.Strategy, error) {
+	resolver := nc.lbResolver
+	if resolver == nil {
+		var err error
+		if resolver, err = loadbalancer.NewResolver(loadbalancer.StrategyNone); err != nil {
+			return nil, err
+		}
+	}
+	return resolver.For(service)
 }
 
-// GetLoadBalancerName returns the name of the load balancer. Implementations must treat the
-// *v1.Service parameter as read-only and not modify it.
+// GetLoadBalancer returns the status of the load balancer for the Service, and
+// whether a CCM-owned load balancer exists for it, by delegating to the
+// resolved strategy. The *v1.Service parameter is treated as read-only.
+func (nc *NtnxCloud) GetLoadBalancer(ctx context.Context, clusterName string, service *v1.Service) (
+	*v1.LoadBalancerStatus, bool, error,
+) {
+	strategy, err := nc.strategyFor(service)
+	if err != nil {
+		return nil, false, err
+	}
+	return strategy.GetLoadBalancer(ctx, clusterName, service)
+}
+
+// GetLoadBalancerName returns the name of the load balancer. The *v1.Service
+// parameter is treated as read-only.
 func (nc *NtnxCloud) GetLoadBalancerName(ct context.Context, clusterName string, service *v1.Service) string {
 	return ""
 }
 
-// It adds an entry "create" into the internal method call record.
-func (nc *NtnxCloud) EnsureLoadBalancer(ct context.Context,
+// EnsureLoadBalancer creates or updates the load balancer for the Service by
+// delegating to the resolved strategy. The *v1.Service and *v1.Node parameters
+// are treated as read-only.
+func (nc *NtnxCloud) EnsureLoadBalancer(ctx context.Context,
 	clusterName string, service *v1.Service, nodes []*v1.Node) (
 	*v1.LoadBalancerStatus, error,
 ) {
-	return nil, nil
+	strategy, err := nc.strategyFor(service)
+	if err != nil {
+		return nil, err
+	}
+	return strategy.EnsureLoadBalancer(ctx, clusterName, service, nodes)
 }
 
-func (nc *NtnxCloud) UpdateLoadBalancer(ct context.Context,
+// UpdateLoadBalancer updates the backends of the Service load balancer by
+// delegating to the resolved strategy.
+func (nc *NtnxCloud) UpdateLoadBalancer(ctx context.Context,
 	clusterName string, service *v1.Service, nodes []*v1.Node,
 ) error {
-	return nil
+	strategy, err := nc.strategyFor(service)
+	if err != nil {
+		return err
+	}
+	return strategy.UpdateLoadBalancer(ctx, clusterName, service, nodes)
 }
 
-// EnsureLoadBalancerDeleted is a test-spy implementation of LoadBalancer.EnsureLoadBalancerDeleted.
-// It adds an entry "delete" into the internal method call record.
-func (nc *NtnxCloud) EnsureLoadBalancerDeleted(ct context.Context, clusterName string,
+// EnsureLoadBalancerDeleted deletes the Service load balancer by delegating to
+// the resolved strategy.
+func (nc *NtnxCloud) EnsureLoadBalancerDeleted(ctx context.Context, clusterName string,
 	service *v1.Service,
 ) error {
-	return nil
+	strategy, err := nc.strategyFor(service)
+	if err != nil {
+		return err
+	}
+	return strategy.EnsureLoadBalancerDeleted(ctx, clusterName, service)
 }

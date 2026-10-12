@@ -74,6 +74,8 @@ The following table lists the configurable parameters of the Nutanix Cloud Provi
 | `username`                          | Username to connect to Prism Central instance                    | `admin`                                                          |
 | `password`                          | Password to connect to Prism Central instance                    | ``                                                               |
 | `enableCustomLabeling`              | Add some additional custom Nutanix labels to nodes               | `false`                                                          |
+| `loadBalancer.enabled`              | Run the Service (LoadBalancer) controller; false disables it at runtime | `true`                                                     |
+| `loadBalancer.defaultStrategy`      | Default LoadBalancer strategy for Services without the override annotation | `None` (do-nothing / legacy MetalLB)                     |
 | `topologyDiscovery.type`            | Define how Topology will be discovered (Prism or Categories)     | `Prism`                                                          |
 | `topologyCategories.region`         | Category name used to assign region topology                     | `region`                                                         |
 | `topologyCategories.zone`           | Category name used to assign zone topology                       | `zone`                                                           |

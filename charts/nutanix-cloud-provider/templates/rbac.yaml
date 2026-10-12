@@ -17,11 +17,30 @@ rules:
     resources:
       - secrets
       - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+  # The Service LoadBalancer controller lists/watches Services, patches the
+  # cleanup finalizer (services), and updates load balancer status
+  # (services/status).
+  - apiGroups:
+      - ""
+    resources:
       - services
     verbs:
       - get
       - list
       - watch
+      - patch
+      - update
+  - apiGroups:
+      - ""
+    resources:
+      - services/status
+    verbs:
+      - patch
+      - update
   - apiGroups:
       - ""
     resources:

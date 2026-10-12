@@ -30,6 +30,16 @@ type Config struct {
 	TopologyDiscovery    TopologyDiscovery                    `json:"topologyDiscovery"`
 	EnableCustomLabeling bool                                 `json:"enableCustomLabeling"`
 	IgnoredNodeIPs       []string                             `json:"ignoredNodeIPs,omitempty"`
+	LoadBalancer         LoadBalancer                         `json:"loadBalancer,omitempty"`
+}
+
+// LoadBalancer holds configuration for the CCM Service LoadBalancer controller.
+type LoadBalancer struct {
+	// DefaultStrategy is the LoadBalancer strategy applied to a Service that
+	// does not carry the strategy override annotation. When empty it defaults
+	// to the "None" (do-nothing) strategy, preserving legacy static-pool
+	// behaviour where MetalLB owns allocation and advertisement.
+	DefaultStrategy string `json:"defaultStrategy,omitempty"`
 }
 
 type TopologyDiscovery struct {
