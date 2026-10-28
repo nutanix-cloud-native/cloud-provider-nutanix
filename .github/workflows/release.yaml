@@ -55,7 +55,7 @@ jobs:
           sep-tags: ","
           sep-labels: ","
           tags: |
-            type=semver,pattern=v{{version}}
+            type=semver,pattern={{raw}}
             type=semver,pattern=v{{major}}.{{minor}}
             type=semver,pattern=v{{major}}
             type=sha
@@ -105,8 +105,10 @@ jobs:
           # published from this repo; defaults to the canonical path.
           HELM_OCI_REPO: ${{ vars.HELM_OCI_REPO || 'ghcr.io/nutanix-cloud-native/chart' }}
         run: |
-          # Chart version tracks the CCM release tag (semver, no leading "v");
-          # appVersion keeps the "v" prefix so it matches the published image tag.
+          # Chart version tracks the CCM release tag (semver, no leading "v").
+          # appVersion keeps the "v" prefix so it matches the published image tag:
+          # the {{raw}} pattern above is the only semver pattern metadata-action
+          # honours for prerelease tags, so the "v" survives for -dev.N tags too.
           VERSION="${GITHUB_REF_NAME#v}"
           helm registry login ghcr.io \
             --username "${{ github.actor }}" \
