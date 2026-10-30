@@ -26,14 +26,36 @@ import (
 	"sort"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/interfaces"
 )
 
 // StrategyNone is the name of the do-nothing strategy. It delegates the whole
 // Service LoadBalancer lifecycle to an external controller (MetalLB), matching
 // the legacy static-pool behaviour.
 const StrategyNone = "None"
+
+// StrategyAutoIPAMMetalLB reserves one Prism address per Service and announces
+// it with a MetalLB /32 pool. Services opt in by setting
+// ccm.nutanix.com/load-balancer-strategy to this value.
+const StrategyAutoIPAMMetalLB = "AutoIPAMMetalLB"
+
+// Dependencies are the clients AutoIPAMMetalLB needs. They are injected after
+// the cloud provider is initialized, because the Kubernetes clients do not
+// exist when the resolver is built.
+type Dependencies struct {
+	// PrismClient resolves the Prism client at call time. Production passes the
+	// nutanix client. Tests may set Prism instead.
+	PrismClient interfaces.Client
+	// Prism is used when already resolved, which is how tests supply a fake.
+	Prism   interfaces.Prism
+	Kube    kubernetes.Interface
+	Dynamic dynamic.Interface
+}
 
 // Strategy encapsulates the backend-specific LoadBalancer operations for a
 // Service. The method set mirrors cloudprovider.LoadBalancer minus
@@ -60,16 +82,21 @@ type Strategy interface {
 type Resolver struct {
 	registry        map[string]Strategy
 	defaultStrategy string
+	autoIPAM        *AutoIPAMMetalLB
 }
 
 // NewResolver builds a Resolver with the built-in strategies registered and the
-// given default. An empty defaultStrategy falls back to StrategyNone. It errors
-// if defaultStrategy is not a registered strategy.
-func NewResolver(defaultStrategy string) (*Resolver, error) {
+// given load balancer config. An empty default strategy falls back to
+// StrategyNone. It errors if the default is not a registered strategy.
+// AutoIPAMMetalLB receives its subnet and MetalLB namespace from lb.
+func NewResolver(lb config.LoadBalancer) (*Resolver, error) {
+	auto := &AutoIPAMMetalLB{config: lb.AutoIPAMMetalLB}
 	registry := map[string]Strategy{
-		StrategyNone: None{},
+		StrategyNone:            None{},
+		StrategyAutoIPAMMetalLB: auto,
 	}
 
+	defaultStrategy := lb.DefaultStrategy
 	if defaultStrategy == "" {
 		defaultStrategy = StrategyNone
 	}
@@ -77,7 +104,15 @@ func NewResolver(defaultStrategy string) (*Resolver, error) {
 		return nil, fmt.Errorf("unknown default load balancer strategy %q (registered: %v)", defaultStrategy, registeredNames(registry))
 	}
 
-	return &Resolver{registry: registry, defaultStrategy: defaultStrategy}, nil
+	return &Resolver{registry: registry, defaultStrategy: defaultStrategy, autoIPAM: auto}, nil
+}
+
+// SetDependencies injects the Prism and Kubernetes clients used by AutoIPAMMetalLB.
+func (r *Resolver) SetDependencies(deps Dependencies) {
+	if r == nil || r.autoIPAM == nil {
+		return
+	}
+	r.autoIPAM.deps = deps
 }
 
 // DefaultStrategy returns the resolver's configured default strategy name.

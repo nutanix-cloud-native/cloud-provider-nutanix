@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 
+	"k8s.io/client-go/dynamic"
 	clientset "k8s.io/client-go/kubernetes"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/klog/v2"
@@ -62,7 +63,7 @@ func newNtnxCloud(configReader io.Reader) (cloudprovider.Interface, error) {
 		return nil, err
 	}
 
-	lbResolver, err := loadbalancer.NewResolver(nutanixConfig.LoadBalancer.DefaultStrategy)
+	lbResolver, err := loadbalancer.NewResolver(nutanixConfig.LoadBalancer)
 	if err != nil {
 		return nil, fmt.Errorf("error configuring load balancer strategies: %v", err)
 	}
@@ -85,6 +86,21 @@ func (nc *NtnxCloud) Initialize(clientBuilder cloudprovider.ControllerClientBuil
 ) {
 	klog.Info("Initializing client ...") //nolint:typecheck
 	nc.addKubernetesClient(clientBuilder.ClientOrDie("cloud-provider-nutanix"))
+
+	dynamicClient, err := dynamic.NewForConfig(clientBuilder.ConfigOrDie("cloud-provider-nutanix"))
+	if err != nil {
+		klog.Fatalf("failed to create dynamic client: %v", err) //nolint:typecheck
+	}
+	if nc.lbResolver != nil {
+		deps := loadbalancer.Dependencies{
+			Kube:    nc.client,
+			Dynamic: dynamicClient,
+		}
+		if nc.manager != nil {
+			deps.PrismClient = nc.manager.nutanixClient
+		}
+		nc.lbResolver.SetDependencies(deps)
+	}
 	klog.Infof("Client initialized") //nolint:typecheck
 }
 

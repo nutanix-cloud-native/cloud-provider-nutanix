@@ -41,6 +41,19 @@ rules:
     verbs:
       - patch
       - update
+  # AutoIPAMMetalLB creates one metallb.io IPAddressPool per Service.
+  - apiGroups:
+      - metallb.io
+    resources:
+      - ipaddresspools
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
   - apiGroups:
       - ""
     resources:

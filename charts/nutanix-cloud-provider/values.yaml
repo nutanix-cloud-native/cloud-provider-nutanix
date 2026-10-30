@@ -46,6 +46,16 @@ loadBalancer:
   # "None" is the do-nothing strategy: MetalLB (CAREN static addressRanges) keeps
   # owning IP allocation, status, and advertisement.
   defaultStrategy: "None"
+  # autoIPAMMetalLB configures the AutoIPAMMetalLB strategy. None ignores these
+  # fields. A Service opts in with
+  # ccm.nutanix.com/load-balancer-strategy=AutoIPAMMetalLB.
+  autoIPAMMetalLB:
+    # subnet is the Prism subnet extID CCM reserves Service addresses from.
+    # Empty makes activation fail before any reservation or MetalLB pool is created.
+    subnet: ""
+    # metalLBNamespace is where CCM creates per-Service /32 IPAddressPools.
+    # Empty defaults to metallb-system.
+    metalLBNamespace: "metallb-system"
 
 topologyDiscovery:
   # Define how Topology will be discovered

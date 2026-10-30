@@ -46,6 +46,30 @@ const (
 
 	// LoadBalancerStrategyAnnotation is set on a Service to override the CCM
 	// default LoadBalancer strategy for that Service. The value must be a
-	// registered strategy name (e.g. "None").
+	// registered strategy name (e.g. "None", "AutoIPAMMetalLB").
 	LoadBalancerStrategyAnnotation string = "ccm.nutanix.com/load-balancer-strategy"
+
+	// LoadBalancerReservationIDAnnotation is the NTNX-Request-Id used to reserve
+	// this Service's address. It is written before the Prism call.
+	LoadBalancerReservationIDAnnotation string = "ccm.nutanix.com/load-balancer-reservation-id"
+	// LoadBalancerIPAnnotation is the address this strategy reserved for the Service.
+	LoadBalancerIPAnnotation string = "ccm.nutanix.com/load-balancer-ip"
+	// LoadBalancerSubnetAnnotation is the Prism subnet extID the address was reserved on.
+	LoadBalancerSubnetAnnotation string = "ccm.nutanix.com/load-balancer-subnet"
+	// MetalLBRequestedIPsAnnotation asks MetalLB to announce exactly these addresses.
+	MetalLBRequestedIPsAnnotation string = "metallb.universe.tf/loadBalancerIPs"
+
+	// LoadBalancerServiceUIDLabel identifies the Service that owns an IPAddressPool.
+	LoadBalancerServiceUIDLabel string = "ccm.nutanix.com/load-balancer-service-uid"
+	// LoadBalancerReservationIDLabel is the reservation id copied onto the IPAddressPool.
+	LoadBalancerReservationIDLabel string = LoadBalancerReservationIDAnnotation
+	// LoadBalancerIPLabel is the reserved address copied onto the IPAddressPool.
+	LoadBalancerIPLabel string = LoadBalancerIPAnnotation
+	// LoadBalancerSubnetLabel is the Prism subnet extID copied onto the IPAddressPool.
+	LoadBalancerSubnetLabel string = LoadBalancerSubnetAnnotation
+	// LoadBalancerPoolTypeLabel selects AutoIPAMMetalLB pools from an L2Advertisement
+	// ipAddressPoolSelectors match.
+	LoadBalancerPoolTypeLabel string = "pool-type"
+	// LoadBalancerPoolTypeAutoIPAMMetalLB is the pool-type value for AutoIPAMMetalLB.
+	LoadBalancerPoolTypeAutoIPAMMetalLB string = "auto-ipam-metallb"
 )

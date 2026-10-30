@@ -26,10 +26,11 @@ import (
 	cloudprovider "k8s.io/cloud-provider"
 
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
 )
 
 func TestNewResolverDefaults(t *testing.T) {
-	r, err := NewResolver("")
+	r, err := NewResolver(config.LoadBalancer{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -39,13 +40,49 @@ func TestNewResolverDefaults(t *testing.T) {
 }
 
 func TestNewResolverUnknownDefault(t *testing.T) {
-	if _, err := NewResolver("does-not-exist"); err == nil {
+	if _, err := NewResolver(config.LoadBalancer{DefaultStrategy: "does-not-exist"}); err == nil {
 		t.Fatal("expected error for unknown default strategy, got nil")
 	}
 }
 
+func TestResolverAcceptsAutoIPAMMetalLB(t *testing.T) {
+	r, err := NewResolver(config.LoadBalancer{DefaultStrategy: StrategyAutoIPAMMetalLB})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r.DefaultStrategy() != StrategyAutoIPAMMetalLB {
+		t.Fatalf("expected default %q, got %q", StrategyAutoIPAMMetalLB, r.DefaultStrategy())
+	}
+	s, err := r.For(&v1.Service{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.Name() != StrategyAutoIPAMMetalLB {
+		t.Fatalf("expected %q, got %q", StrategyAutoIPAMMetalLB, s.Name())
+	}
+
+	noneDefault, err := NewResolver(config.LoadBalancer{DefaultStrategy: StrategyNone})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	svc := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		Annotations: map[string]string{constants.LoadBalancerStrategyAnnotation: StrategyAutoIPAMMetalLB},
+	}}
+	s, err = noneDefault.For(svc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.Name() != StrategyAutoIPAMMetalLB {
+		t.Fatalf("expected override %q, got %q", StrategyAutoIPAMMetalLB, s.Name())
+	}
+	svc.Annotations[constants.LoadBalancerStrategyAnnotation] = "bogus"
+	if _, err := noneDefault.For(svc); err == nil {
+		t.Fatal("expected error for unknown override strategy, got nil")
+	}
+}
+
 func TestResolverForUsesDefaultWhenNoAnnotation(t *testing.T) {
-	r, err := NewResolver(StrategyNone)
+	r, err := NewResolver(config.LoadBalancer{DefaultStrategy: StrategyNone})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -59,7 +96,7 @@ func TestResolverForUsesDefaultWhenNoAnnotation(t *testing.T) {
 }
 
 func TestResolverForNilService(t *testing.T) {
-	r, _ := NewResolver(StrategyNone)
+	r, _ := NewResolver(config.LoadBalancer{DefaultStrategy: StrategyNone})
 	s, err := r.For(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -70,7 +107,7 @@ func TestResolverForNilService(t *testing.T) {
 }
 
 func TestResolverForAnnotationOverride(t *testing.T) {
-	r, _ := NewResolver(StrategyNone)
+	r, _ := NewResolver(config.LoadBalancer{DefaultStrategy: StrategyNone})
 
 	// Known override selects that strategy.
 	svc := &v1.Service{ObjectMeta: metav1.ObjectMeta{

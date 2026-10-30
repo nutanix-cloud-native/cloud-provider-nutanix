@@ -18,6 +18,7 @@ package interfaces
 
 import (
 	"context"
+	"errors"
 
 	clusterModels "github.com/nutanix/ntnx-api-golang-clients/clustermgmt-go-client/v4/models/clustermgmt/v4/config"
 	multidomainModels "github.com/nutanix/ntnx-api-golang-clients/multidomain-go-client/v4/models/multidomain/v4/config"
@@ -31,8 +32,24 @@ type Client interface {
 	SetInformers(sharedInformers informers.SharedInformerFactory)
 }
 
+var (
+	// ErrIPTaskPending means a Prism IP reserve task did not reach a terminal
+	// status before the wait timed out. Callers retry; a reserve retry must reuse
+	// the same request id.
+	ErrIPTaskPending = errors.New("prism ip task is pending")
+
+	// ErrIPReservationTerminal means the reserve task failed and will not succeed
+	// if the same request id is reused.
+	ErrIPReservationTerminal = errors.New("prism ip reservation failed")
+)
+
 type Prism interface {
 	IsProjectScoped(ctx context.Context) bool
+	// ReserveIP reserves one address on subnetExtID and waits for the Prism task
+	// to finish. requestID is the idempotency key. clientContext is stored with
+	// the reservation. A wait timeout returns ErrIPTaskPending. A failed task
+	// returns ErrIPReservationTerminal.
+	ReserveIP(ctx context.Context, subnetExtID, requestID, clientContext string) (string, error)
 	GetVM(ctx context.Context, vmUUID string) (*vmmModels.Vm, error)
 	GetVMByBiosUUid(ctx context.Context, biosUUID string) (*vmmModels.Vm, error)
 	GetCluster(ctx context.Context, clusterUUID string) (*clusterModels.Cluster, error)

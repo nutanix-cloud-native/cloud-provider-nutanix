@@ -21,6 +21,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/loadbalancer"
 )
 
@@ -32,7 +33,7 @@ func (nc *NtnxCloud) strategyFor(service *v1.Service) (loadbalancer.Strategy, er
 	resolver := nc.lbResolver
 	if resolver == nil {
 		var err error
-		if resolver, err = loadbalancer.NewResolver(loadbalancer.StrategyNone); err != nil {
+		if resolver, err = loadbalancer.NewResolver(config.LoadBalancer{}); err != nil {
 			return nil, err
 		}
 	}

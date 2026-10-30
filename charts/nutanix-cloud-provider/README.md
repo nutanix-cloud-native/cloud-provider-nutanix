@@ -76,6 +76,8 @@ The following table lists the configurable parameters of the Nutanix Cloud Provi
 | `enableCustomLabeling`              | Add some additional custom Nutanix labels to nodes               | `false`                                                          |
 | `loadBalancer.enabled`              | Run the Service (LoadBalancer) controller; false disables it at runtime | `true`                                                     |
 | `loadBalancer.defaultStrategy`      | Default LoadBalancer strategy for Services without the override annotation | `None` (do-nothing / legacy MetalLB)                     |
+| `loadBalancer.autoIPAMMetalLB.subnet` | Prism subnet extID used when a Service selects AutoIPAMMetalLB | `` |
+| `loadBalancer.autoIPAMMetalLB.metalLBNamespace` | Namespace of the per-Service MetalLB IPAddressPool | `metallb-system` |
 | `topologyDiscovery.type`            | Define how Topology will be discovered (Prism or Categories)     | `Prism`                                                          |
 | `topologyCategories.region`         | Category name used to assign region topology                     | `region`                                                         |
 | `topologyCategories.zone`           | Category name used to assign zone topology                       | `zone`                                                           |

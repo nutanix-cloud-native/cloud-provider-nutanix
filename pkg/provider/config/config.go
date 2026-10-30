@@ -40,6 +40,19 @@ type LoadBalancer struct {
 	// to the "None" (do-nothing) strategy, preserving legacy static-pool
 	// behaviour where MetalLB owns allocation and advertisement.
 	DefaultStrategy string `json:"defaultStrategy,omitempty"`
+	// AutoIPAMMetalLB configures the AutoIPAMMetalLB strategy. None does not use it.
+	AutoIPAMMetalLB AutoIPAMMetalLB `json:"autoIPAMMetalLB,omitempty"`
+}
+
+// AutoIPAMMetalLB configures reservation of one Prism address per Service and
+// the MetalLB pool that announces it.
+type AutoIPAMMetalLB struct {
+	// Subnet is the Prism subnet extID addresses are reserved from. Empty makes
+	// activation fail before any Prism or MetalLB write.
+	Subnet string `json:"subnet,omitempty"`
+	// MetalLBNamespace is the namespace of the per-Service IPAddressPool.
+	// Empty defaults to metallb-system.
+	MetalLBNamespace string `json:"metalLBNamespace,omitempty"`
 }
 
 type TopologyDiscovery struct {

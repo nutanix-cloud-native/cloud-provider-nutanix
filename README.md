@@ -23,6 +23,21 @@ configurable values and additional examples.
 
 ## Developer Workflow
 
+### Unit tests
+```
+make unit-test
+```
+
+### AutoIPAM PC integration tests
+
+envtest + real Prism Central (no MetalLB). Requires `NUTANIX_ENDPOINT`,
+credentials, and `NUTANIX_SUBNET_NAME`. See
+[`test/integration/autoipam/README.md`](test/integration/autoipam/README.md).
+
+```
+make integration-test
+```
+
 ### Build the image
 ```
 make docker-build
