@@ -623,6 +623,136 @@ func TestNutanixClientReserveIPPendingTimeout(t *testing.T) {
 	}
 }
 
+func TestNutanixClientUnreserveIP(t *testing.T) {
+	for _, projectScoped := range []bool{false, true} {
+		projectScoped := projectScoped
+		name := "cluster-wide"
+		if projectScoped {
+			name = "project-scoped"
+		}
+		t.Run(name, func(t *testing.T) {
+			stubProjectScope(t, projectScoped)
+			subnets := &fakeSubnets{taskID: "task-unreserve"}
+			if projectScoped {
+				overlay := subnetModels.SUBNETTYPE_OVERLAY
+				subnets.subnet = &subnetModels.Subnet{ExtId: ptr.To("subnet-ext"), SubnetType: &overlay}
+			}
+			status := prismModels.TASKSTATUS_SUCCEEDED
+			tasks := &fakeTasks{task: &prismModels.Task{Status: &status}}
+			clusters := &recordingClusters{}
+			client := &nutanixClient{convergedClient: &convergedV4.Client{}}
+			client.convergedClient.Subnets = subnets
+			client.convergedClient.Tasks = tasks
+			client.convergedClient.Clusters = clusters
+
+			if err := client.UnreserveIP(context.Background(), "subnet-ext", "request-unreserve", "service-uid"); err != nil {
+				t.Fatalf("UnreserveIP: %v", err)
+			}
+			if subnets.unreserveCalls != 1 || subnets.lastUnreserveSubnet != "subnet-ext" {
+				t.Fatalf("unreserve calls=%d subnet=%q", subnets.unreserveCalls, subnets.lastUnreserveSubnet)
+			}
+			spec, ok := subnets.lastUnreserveSpec.(*subnetModels.IpUnreserveSpec)
+			if !ok || spec.UnreserveType == nil || *spec.UnreserveType != subnetModels.UNRESERVETYPE_CONTEXT {
+				t.Fatalf("unreserve spec = %#v", subnets.lastUnreserveSpec)
+			}
+			if spec.ClientContext == nil || *spec.ClientContext != "service-uid" {
+				t.Fatalf("clientContext = %#v", spec.ClientContext)
+			}
+			if got := ntnxRequestID(subnets.lastUnreserveCtx); got != "request-unreserve" {
+				t.Fatalf("request id = %q, want request-unreserve", got)
+			}
+			if tasks.gets != 1 || tasks.lastID != "task-unreserve" {
+				t.Fatalf("Tasks.Get calls=%d id=%q", tasks.gets, tasks.lastID)
+			}
+			if clusters.gets != 0 || clusters.lists != 0 {
+				t.Fatalf("cluster calls get=%d list=%d", clusters.gets, clusters.lists)
+			}
+			if projectScoped && subnets.getCalls != 1 {
+				t.Fatalf("Subnets.Get calls = %d, want 1", subnets.getCalls)
+			}
+			if !projectScoped && subnets.getCalls != 0 {
+				t.Fatalf("cluster-wide Subnets.Get calls = %d, want 0", subnets.getCalls)
+			}
+		})
+	}
+}
+
+func TestNutanixClientUnreserveIPAlreadyGone(t *testing.T) {
+	stubProjectScope(t, false)
+	subnets := &fakeSubnets{unreserveErr: &converged.APIError{Kind: converged.ErrNotFound, Cause: errors.New("reservation not found")}}
+	client := &nutanixClient{convergedClient: &convergedV4.Client{}}
+	client.convergedClient.Subnets = subnets
+	client.convergedClient.Tasks = &fakeTasks{}
+
+	if err := client.UnreserveIP(context.Background(), "subnet-ext", "request-1", "service-uid"); err != nil {
+		t.Fatalf("already gone UnreserveIP: %v", err)
+	}
+	if subnets.unreserveCalls != 1 {
+		t.Fatalf("unreserve calls = %d, want 1", subnets.unreserveCalls)
+	}
+}
+
+func TestNutanixClientUnreserveIPTaskAlreadyGone(t *testing.T) {
+	stubProjectScope(t, false)
+	status := prismModels.TASKSTATUS_FAILED
+	subnets := &fakeSubnets{taskID: "task-gone"}
+	tasks := &fakeTasks{task: &prismModels.Task{Status: &status, LegacyErrorMessage: ptr.To("IP reservation not found")}}
+	client := &nutanixClient{convergedClient: &convergedV4.Client{}}
+	client.convergedClient.Subnets = subnets
+	client.convergedClient.Tasks = tasks
+
+	if err := client.UnreserveIP(context.Background(), "subnet-ext", "request-1", "service-uid"); err != nil {
+		t.Fatalf("task not found UnreserveIP: %v", err)
+	}
+}
+
+func TestNutanixClientUnreserveIPTerminal(t *testing.T) {
+	stubProjectScope(t, false)
+	status := prismModels.TASKSTATUS_FAILED
+	subnets := &fakeSubnets{taskID: "task-failed"}
+	tasks := &fakeTasks{task: &prismModels.Task{Status: &status, LegacyErrorMessage: ptr.To("subnet busy")}}
+	client := &nutanixClient{convergedClient: &convergedV4.Client{}}
+	client.convergedClient.Subnets = subnets
+	client.convergedClient.Tasks = tasks
+
+	err := client.UnreserveIP(context.Background(), "subnet-ext", "request-1", "service-uid")
+	if !errors.Is(err, interfaces.ErrIPReservationTerminal) {
+		t.Fatalf("expected terminal error, got %v", err)
+	}
+}
+
+func TestNutanixClientUnreserveIPPendingTimeout(t *testing.T) {
+	stubProjectScope(t, false)
+	status := prismModels.TASKSTATUS_QUEUED
+	subnets := &fakeSubnets{taskID: "task-pending"}
+	tasks := &fakeTasks{task: &prismModels.Task{Status: &status}}
+	client := &nutanixClient{convergedClient: &convergedV4.Client{}}
+	client.convergedClient.Subnets = subnets
+	client.convergedClient.Tasks = tasks
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	err := client.UnreserveIP(ctx, "subnet-ext", "request-1", "service-uid")
+	if !errors.Is(err, interfaces.ErrIPTaskPending) {
+		t.Fatalf("expected pending error, got %v", err)
+	}
+}
+
+func TestNutanixClientUnreserveIPProjectScopedSubnetNotVisible(t *testing.T) {
+	stubProjectScope(t, true)
+	subnets := &fakeSubnets{getErr: errors.New("subnet not found")}
+	client := &nutanixClient{convergedClient: &convergedV4.Client{}}
+	client.convergedClient.Subnets = subnets
+	client.convergedClient.Tasks = &fakeTasks{}
+
+	if err := client.UnreserveIP(context.Background(), "hidden", "request-1", "service-uid"); err == nil {
+		t.Fatal("expected visibility error, got nil")
+	}
+	if subnets.unreserveCalls != 0 {
+		t.Fatal("unreserved an invisible subnet")
+	}
+}
+
 func stubProjectScope(t *testing.T, scoped bool) {
 	t.Helper()
 	prevVersion := getPCVersionFn
@@ -690,14 +820,19 @@ func ntnxRequestID(ctx context.Context) string {
 }
 
 type fakeSubnets struct {
-	subnet            *subnetModels.Subnet
-	getErr            error
-	getCalls          int
-	taskID            string
-	reserveCalls      int
-	lastReserveCtx    context.Context
-	lastReserveSubnet string
-	lastReserveSpec   any
+	subnet              *subnetModels.Subnet
+	getErr              error
+	getCalls            int
+	taskID              string
+	reserveCalls        int
+	lastReserveCtx      context.Context
+	lastReserveSubnet   string
+	lastReserveSpec     any
+	unreserveCalls      int
+	unreserveErr        error
+	lastUnreserveCtx    context.Context
+	lastUnreserveSubnet string
+	lastUnreserveSpec   any
 }
 
 func (f *fakeSubnets) Get(context.Context, string) (*subnetModels.Subnet, error) {
@@ -727,8 +862,15 @@ func (f *fakeSubnets) ReserveIpsBySubnetId(ctx context.Context, subnetExtID stri
 	return &networkingprism.TaskReference{ExtId: ptr.To(f.taskID)}, nil
 }
 
-func (f *fakeSubnets) UnreserveIpsBySubnetId(context.Context, string, any) (*networkingprism.TaskReference, error) {
-	return nil, errors.New("unreserve not implemented")
+func (f *fakeSubnets) UnreserveIpsBySubnetId(ctx context.Context, subnetExtID string, spec any) (*networkingprism.TaskReference, error) {
+	f.unreserveCalls++
+	f.lastUnreserveCtx = ctx
+	f.lastUnreserveSubnet = subnetExtID
+	f.lastUnreserveSpec = spec
+	if f.unreserveErr != nil {
+		return nil, f.unreserveErr
+	}
+	return &networkingprism.TaskReference{ExtId: ptr.To(f.taskID)}, nil
 }
 
 func (f *fakeSubnets) ListReservedIpsBySubnetId(context.Context, string, ...converged.ODataOption) (any, error) {

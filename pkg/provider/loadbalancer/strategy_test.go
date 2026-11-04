@@ -39,6 +39,39 @@ func TestNewResolverDefaults(t *testing.T) {
 	}
 }
 
+func TestForReleaseKeepsAutoIPAMReservation(t *testing.T) {
+	r, err := NewResolver(config.LoadBalancer{DefaultStrategy: StrategyNone})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	held := &v1.Service{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+		constants.LoadBalancerStrategyAnnotation:      StrategyNone,
+		constants.LoadBalancerIPAnnotation:            "10.0.0.1",
+		constants.LoadBalancerReservationIDAnnotation: "res-1",
+	}}}
+	s, err := r.ForRelease(held)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.Name() != StrategyAutoIPAMMetalLB {
+		t.Fatalf("held reservation strategy = %q, want %q", s.Name(), StrategyAutoIPAMMetalLB)
+	}
+	s, err = r.For(&v1.Service{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.Name() != StrategyNone {
+		t.Fatalf("create strategy = %q, want %q", s.Name(), StrategyNone)
+	}
+	released, err := r.ForRelease(&v1.Service{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if released.Name() != StrategyNone {
+		t.Fatalf("release without reservation = %q, want %q", released.Name(), StrategyNone)
+	}
+}
+
 func TestNewResolverUnknownDefault(t *testing.T) {
 	if _, err := NewResolver(config.LoadBalancer{DefaultStrategy: "does-not-exist"}); err == nil {
 		t.Fatal("expected error for unknown default strategy, got nil")

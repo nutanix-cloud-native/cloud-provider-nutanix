@@ -40,6 +40,7 @@ type MockPrism struct {
 	GetResourceGroupsOverride      func(ctx context.Context) ([]multidomainModels.ResourceGroup, error)
 	ListDomainManagersOverride     func(ctx context.Context) ([]prismModels.DomainManager, error)
 	ReserveIPOverride              func(ctx context.Context, subnetExtID, requestID, clientContext string) (string, error)
+	UnreserveIPOverride            func(ctx context.Context, subnetExtID, requestID, clientContext string) error
 }
 
 func (mp *MockPrism) IsProjectScoped(ctx context.Context) bool {
@@ -172,4 +173,11 @@ func (mp *MockPrism) ReserveIP(ctx context.Context, subnetExtID, requestID, clie
 		return mp.ReserveIPOverride(ctx, subnetExtID, requestID, clientContext)
 	}
 	return "", fmt.Errorf("ReserveIP not implemented")
+}
+
+func (mp *MockPrism) UnreserveIP(ctx context.Context, subnetExtID, requestID, clientContext string) error {
+	if mp.UnreserveIPOverride != nil {
+		return mp.UnreserveIPOverride(ctx, subnetExtID, requestID, clientContext)
+	}
+	return fmt.Errorf("UnreserveIP not implemented")
 }

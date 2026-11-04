@@ -98,7 +98,7 @@ func SubnetExtIDByName(ctx context.Context, client *convergedV4.Client, name str
 }
 
 // UnreserveIPByContext releases a reservation by Service UID client context.
-// Integration tests use this because product UnreserveIP is out of scope.
+// Harness cleanup uses it as a backstop. Product delete calls Prism.UnreserveIP.
 func UnreserveIPByContext(ctx context.Context, client *convergedV4.Client, subnetExtID, requestID, clientContext string) error {
 	if client == nil || client.Subnets == nil {
 		return fmt.Errorf("prism subnet client is not initialized")

@@ -52,6 +52,11 @@ If required variables are missing, the suite skips.
 
 ## Cleanup
 
-Product unreserve is out of scope. Each test registers harness cleanup that calls
-Prism `UnreserveIpsBySubnetId` by Service UID, deletes the pool, strips
-`service.kubernetes.io/load-balancer-cleanup`, and deletes the Service.
+Deleting a LoadBalancer Service unreserves its Prism address and deletes the
+IPAddressPool. The Service controller retries that release until it succeeds,
+then removes `service.kubernetes.io/load-balancer-cleanup`.
+
+Each test also registers harness cleanup that calls Prism
+`UnreserveIpsBySubnetId` by Service UID, deletes the pool, strips the cleanup
+finalizer, and deletes the Service. That cleanup is a backstop when a test
+fails before the product release finishes.

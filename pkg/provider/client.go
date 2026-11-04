@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nutanix-cloud-native/prism-go-client/converged"
 	convergedV4 "github.com/nutanix-cloud-native/prism-go-client/converged/v4"
 	"github.com/nutanix-cloud-native/prism-go-client/environment"
 	credentialtypes "github.com/nutanix-cloud-native/prism-go-client/environment/credentials"
@@ -52,10 +53,10 @@ import (
 const errEnvironmentNotReady = "environment not initialized or ready yet"
 const zeroUUID = "00000000-0000-0000-0000-000000000000"
 
-// ipTaskPollInterval is how often ReserveIP re-reads a Prism task.
+// ipTaskPollInterval is how often ReserveIP and UnreserveIP re-read a Prism task.
 const ipTaskPollInterval = time.Second
 
-// ipTaskWaitTimeout is the maximum time ReserveIP waits for a reserve task.
+// ipTaskWaitTimeout is the maximum time ReserveIP and UnreserveIP wait for a task.
 const ipTaskWaitTimeout = 2 * time.Minute
 
 type nutanixClientEnvironment struct {
@@ -393,6 +394,65 @@ func (client *nutanixClient) ReserveIP(ctx context.Context, subnetExtID, request
 	return client.readIPTask(ctx, taskID)
 }
 
+// UnreserveIP releases the reservation identified by clientContext on subnetExtID.
+// Cluster-wide and project-scoped clients both call the subnet address API.
+// A project-scoped client confirms the subnet extID is visible first.
+func (client *nutanixClient) UnreserveIP(ctx context.Context, subnetExtID, requestID, clientContext string) error {
+	if err := client.requireSubnetExtID(subnetExtID); err != nil {
+		return err
+	}
+	if clientContext == "" {
+		return fmt.Errorf("client context is required to unreserve an IP")
+	}
+	if client.convergedClient == nil || client.convergedClient.Subnets == nil {
+		return fmt.Errorf("prism subnet client is not initialized")
+	}
+
+	if client.IsProjectScoped(ctx) {
+		if _, err := client.convergedClient.Subnets.Get(ctx, subnetExtID); err != nil {
+			return fmt.Errorf("subnet %s is not visible to project-scoped credentials: %w", subnetExtID, err)
+		}
+	}
+
+	spec := subnetModels.NewIpUnreserveSpec()
+	unreserveType := subnetModels.UNRESERVETYPE_CONTEXT
+	spec.UnreserveType = &unreserveType
+	spec.ClientContext = strPtr(clientContext)
+
+	unreserveCtx := convergedV4.WithRequestID(ctx, requestID)
+	taskRef, err := client.convergedClient.Subnets.UnreserveIpsBySubnetId(unreserveCtx, subnetExtID, spec)
+	if err != nil {
+		if isReservationGone(err) {
+			return nil
+		}
+		return fmt.Errorf("unreserve IP on subnet %s: %w", subnetExtID, err)
+	}
+	taskID, err := taskExtID(taskRef)
+	if err != nil {
+		return fmt.Errorf("unreserve IP on subnet %s: %w", subnetExtID, err)
+	}
+	if _, err := client.waitIPTask(ctx, taskID); err != nil {
+		if isReservationGone(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// isReservationGone reports whether err means the reservation was already
+// released. Prism reports that as a not-found API error or a failed task.
+func isReservationGone(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *converged.APIError
+	if errors.As(err, &apiErr) && apiErr.Kind == converged.ErrNotFound {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "not found")
+}
+
 func (client *nutanixClient) requireSubnetExtID(subnetExtID string) error {
 	if subnetExtID == "" {
 		return fmt.Errorf("subnet extID is required")
@@ -407,15 +467,27 @@ func taskExtID(taskRef *networkingprism.TaskReference) (string, error) {
 	return *taskRef.ExtId, nil
 }
 
-// readIPTask polls Tasks.Get until the reserve task succeeds or fails. A
-// succeeded task must include the reserved address. If the wait times out while
-// the task is still pending, it returns ErrIPTaskPending.
+// readIPTask polls until the reserve task succeeds and returns the reserved
+// address. A succeeded task without an address is terminal. A wait timeout
+// returns ErrIPTaskPending.
 func (client *nutanixClient) readIPTask(ctx context.Context, taskID string) (string, error) {
-	if client.convergedClient.Tasks == nil {
-		return "", fmt.Errorf("prism task client is not initialized")
+	task, err := client.waitIPTask(ctx, taskID)
+	if err != nil {
+		return "", err
+	}
+	ip := reservedIP(task)
+	if ip == "" {
+		return "", fmt.Errorf("%w: task %s succeeded without an IP address", interfaces.ErrIPReservationTerminal, taskID)
+	}
+	return ip, nil
+}
+
+func (client *nutanixClient) waitIPTask(ctx context.Context, taskID string) (*prismModels.Task, error) {
+	if client.convergedClient == nil || client.convergedClient.Tasks == nil {
+		return nil, fmt.Errorf("prism task client is not initialized")
 	}
 
-	var ip string
+	var done *prismModels.Task
 	err := wait.PollUntilContextTimeout(ctx, ipTaskPollInterval, ipTaskWaitTimeout, true, func(ctx context.Context) (bool, error) {
 		task, err := client.convergedClient.Tasks.Get(ctx, taskID)
 		if err != nil {
@@ -427,10 +499,7 @@ func (client *nutanixClient) readIPTask(ctx context.Context, taskID string) (str
 
 		switch *task.Status {
 		case prismModels.TASKSTATUS_SUCCEEDED:
-			ip = reservedIP(task)
-			if ip == "" {
-				return false, fmt.Errorf("%w: task %s succeeded without an IP address", interfaces.ErrIPReservationTerminal, taskID)
-			}
+			done = task
 			return true, nil
 		case prismModels.TASKSTATUS_FAILED, prismModels.TASKSTATUS_CANCELED, prismModels.TASKSTATUS_CANCELING:
 			return false, fmt.Errorf("%w: %s", interfaces.ErrIPReservationTerminal, taskFailureDetail(task))
@@ -440,11 +509,11 @@ func (client *nutanixClient) readIPTask(ctx context.Context, taskID string) (str
 	})
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || wait.Interrupted(err) {
-			return "", fmt.Errorf("%w: task %s did not complete: %w", interfaces.ErrIPTaskPending, taskID, err)
+			return nil, fmt.Errorf("%w: task %s did not complete: %w", interfaces.ErrIPTaskPending, taskID, err)
 		}
-		return "", err
+		return nil, err
 	}
-	return ip, nil
+	return done, nil
 }
 
 func taskFailureDetail(task *prismModels.Task) string {

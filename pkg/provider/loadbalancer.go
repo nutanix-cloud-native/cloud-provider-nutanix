@@ -30,14 +30,29 @@ import (
 // default. It tolerates a nil resolver (e.g. a zero-value NtnxCloud in tests) by
 // falling back to the built-in default resolver (None).
 func (nc *NtnxCloud) strategyFor(service *v1.Service) (loadbalancer.Strategy, error) {
-	resolver := nc.lbResolver
-	if resolver == nil {
-		var err error
-		if resolver, err = loadbalancer.NewResolver(config.LoadBalancer{}); err != nil {
-			return nil, err
-		}
+	resolver, err := nc.resolver()
+	if err != nil {
+		return nil, err
 	}
 	return resolver.For(service)
+}
+
+// strategyForRelease resolves the strategy that must release a Service. A held
+// AutoIPAM reservation stays with AutoIPAMMetalLB so cleanup cannot drop the
+// finalizer while the address is reserved.
+func (nc *NtnxCloud) strategyForRelease(service *v1.Service) (loadbalancer.Strategy, error) {
+	resolver, err := nc.resolver()
+	if err != nil {
+		return nil, err
+	}
+	return resolver.ForRelease(service)
+}
+
+func (nc *NtnxCloud) resolver() (*loadbalancer.Resolver, error) {
+	if nc.lbResolver != nil {
+		return nc.lbResolver, nil
+	}
+	return loadbalancer.NewResolver(config.LoadBalancer{})
 }
 
 // GetLoadBalancer returns the status of the load balancer for the Service, and
@@ -46,7 +61,7 @@ func (nc *NtnxCloud) strategyFor(service *v1.Service) (loadbalancer.Strategy, er
 func (nc *NtnxCloud) GetLoadBalancer(ctx context.Context, clusterName string, service *v1.Service) (
 	*v1.LoadBalancerStatus, bool, error,
 ) {
-	strategy, err := nc.strategyFor(service)
+	strategy, err := nc.strategyForRelease(service)
 	if err != nil {
 		return nil, false, err
 	}
@@ -90,7 +105,7 @@ func (nc *NtnxCloud) UpdateLoadBalancer(ctx context.Context,
 func (nc *NtnxCloud) EnsureLoadBalancerDeleted(ctx context.Context, clusterName string,
 	service *v1.Service,
 ) error {
-	strategy, err := nc.strategyFor(service)
+	strategy, err := nc.strategyForRelease(service)
 	if err != nil {
 		return err
 	}

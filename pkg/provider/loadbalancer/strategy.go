@@ -118,6 +118,28 @@ func (r *Resolver) SetDependencies(deps Dependencies) {
 // DefaultStrategy returns the resolver's configured default strategy name.
 func (r *Resolver) DefaultStrategy() string { return r.defaultStrategy }
 
+// ForRelease returns the strategy that owns cleanup for service. A Service that
+// still has an AutoIPAMMetalLB reservation uses that strategy even when the
+// selected strategy is None. Otherwise GetLoadBalancer would report
+// exists=false, the Service controller would skip delete, and it would remove
+// the cleanup finalizer while the address is still reserved.
+func (r *Resolver) ForRelease(service *v1.Service) (Strategy, error) {
+	if r == nil {
+		return nil, fmt.Errorf("load balancer resolver is not initialized")
+	}
+	if serviceHoldsAutoIPAMReservation(service) {
+		if strategy, ok := r.registry[StrategyAutoIPAMMetalLB]; ok {
+			return strategy, nil
+		}
+	}
+	return r.For(service)
+}
+
+func serviceHoldsAutoIPAMReservation(service *v1.Service) bool {
+	return serviceAnnotation(service, constants.LoadBalancerIPAnnotation) != "" ||
+		serviceAnnotation(service, constants.LoadBalancerReservationIDAnnotation) != ""
+}
+
 // For returns the Strategy for the given Service. The Service override
 // annotation (constants.LoadBalancerStrategyAnnotation) takes precedence over
 // the configured default. An override that names an unregistered strategy is an

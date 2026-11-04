@@ -20,15 +20,14 @@ package autoipam
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/wait"
-	cloudprovider "k8s.io/cloud-provider"
 	servicehelpers "k8s.io/cloud-provider/service/helpers"
 
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
@@ -107,53 +106,40 @@ func TestAutoIPAMIdempotentEnsure(t *testing.T) {
 	h.logManifests("after idempotent requeue", second)
 }
 
-func TestAutoIPAMDeleteStubKeepsReservation(t *testing.T) {
+func TestAutoIPAMDeleteReleasesReservation(t *testing.T) {
 	h := startHarness(t)
 	svc := h.createLoadBalancerService("delete-me")
 	got := h.waitForActivation(svc.Namespace, svc.Name)
 	uid := string(got.UID)
-	ip := got.Annotations[constants.LoadBalancerIPAnnotation]
 
 	if err := h.kube.CoreV1().Services(svc.Namespace).Delete(h.ctx, svc.Name, metav1.DeleteOptions{}); err != nil {
 		t.Fatalf("delete service: %v", err)
 	}
 
-	err := wait.PollUntilContextTimeout(h.ctx, time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
-		cur, err := h.kube.CoreV1().Services(svc.Namespace).Get(ctx, svc.Name, metav1.GetOptions{})
-		if err != nil {
+	// The Service controller keeps the cleanup finalizer until unreserve and
+	// pool deletion succeed, then the API removes the Service.
+	err := wait.PollUntilContextTimeout(h.ctx, time.Second, 5*time.Minute, true, func(ctx context.Context) (bool, error) {
+		_, err := h.kube.CoreV1().Services(svc.Namespace).Get(ctx, svc.Name, metav1.GetOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
 			return false, err
 		}
-		return cur.DeletionTimestamp != nil, nil
+		if err == nil {
+			return false, nil
+		}
+		_, poolErr := h.dyn.Resource(ipAddressPoolGVR).Namespace(h.metalLBNS).Get(ctx, uid, metav1.GetOptions{})
+		if apierrors.IsNotFound(poolErr) {
+			return true, nil
+		}
+		if poolErr != nil {
+			return false, poolErr
+		}
+		return false, nil
 	})
 	if err != nil {
-		t.Fatalf("wait for deletionTimestamp: %v", err)
-	}
-
-	// EnsureLoadBalancerDeleted is a stub: finalizer and reservation stay.
-	time.Sleep(5 * time.Second)
-	cur, err := h.kube.CoreV1().Services(svc.Namespace).Get(h.ctx, svc.Name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("get deleting service: %v", err)
-	}
-	if !hasFinalizer(cur, servicehelpers.LoadBalancerCleanupFinalizer) {
-		t.Fatal("cleanup finalizer was removed despite delete stub")
-	}
-	if cur.Annotations[constants.LoadBalancerIPAnnotation] != ip {
-		t.Fatalf("IP annotation cleared: %q", cur.Annotations[constants.LoadBalancerIPAnnotation])
-	}
-	_ = h.getPool(uid)
-	h.logManifests("after delete stub (reservation kept)", cur)
-
-	lb, ok := h.cloud.LoadBalancer()
-	if !ok {
-		t.Fatal("cloud has no LoadBalancer")
-	}
-	delErr := lb.EnsureLoadBalancerDeleted(h.ctx, integrationCluster, cur)
-	if delErr == nil {
-		t.Fatal("EnsureLoadBalancerDeleted returned nil")
-	}
-	if errors.Is(delErr, cloudprovider.ImplementedElsewhere) {
-		t.Fatal("EnsureLoadBalancerDeleted returned ImplementedElsewhere")
+		if cur, getErr := h.kube.CoreV1().Services(svc.Namespace).Get(h.ctx, svc.Name, metav1.GetOptions{}); getErr == nil {
+			h.logManifests("delete timed out", cur)
+		}
+		t.Fatalf("wait for reservation release: %v", err)
 	}
 }
 
