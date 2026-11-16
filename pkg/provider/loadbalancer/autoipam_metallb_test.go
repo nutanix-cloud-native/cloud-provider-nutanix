@@ -294,14 +294,19 @@ func TestAutoIPAMTwoServicesAndRestart(t *testing.T) {
 
 	ips := []string{"10.8.0.1", "10.8.0.2"}
 	var reserveCalls int
+	held := map[string][]string{}
 	prism := &mock.MockPrism{
-		ReserveIPOverride: func(context.Context, string, string, string) (string, error) {
+		ReserveIPOverride: func(_ context.Context, _, _, clientContext string) (string, error) {
 			if reserveCalls >= len(ips) {
 				t.Fatalf("unexpected ReserveIP call %d", reserveCalls+1)
 			}
 			ip := ips[reserveCalls]
 			reserveCalls++
+			held[clientContext] = append(held[clientContext], ip)
 			return ip, nil
+		},
+		ReservedIPsOverride: func(_ context.Context, _, clientContext string) ([]string, error) {
+			return held[clientContext], nil
 		},
 	}
 
@@ -385,8 +390,9 @@ func TestAutoIPAMEnsureDeletedReleasesReservation(t *testing.T) {
 	if prism.lastUnreserve.subnet != "stored-subnet" || prism.lastUnreserve.clientContext != "uid-web" {
 		t.Fatalf("unreserve = %+v, want stored-subnet and uid-web", prism.lastUnreserve)
 	}
-	if prism.lastUnreserve.requestID != unreserveRequestID("uid-web") {
-		t.Fatalf("request id = %q, want %q", prism.lastUnreserve.requestID, unreserveRequestID("uid-web"))
+	// Keyed on the reservation id, not the Service UID: see unreserveRequestID.
+	if prism.lastUnreserve.requestID != unreserveRequestID("res-1") {
+		t.Fatalf("request id = %q, want %q", prism.lastUnreserve.requestID, unreserveRequestID("res-1"))
 	}
 	got := mustGetService(t, kube, "default", "web")
 	if hasReservationAnnotations(got) {
@@ -577,14 +583,26 @@ func TestAutoIPAMEnsureDeletedMissingSubnet(t *testing.T) {
 	}
 }
 
+// countingPrism is a fake Prism that counts calls and keeps the reservations it
+// hands out, so ReservedIPs answers from the same state a real PC would.
 type countingPrism struct {
 	reserveCalls   int
 	unreserveCalls int
 	ip             string
 	reserveErr     error
 	unreserveErr   error
+	reservedErr    error
 	onReserve      func()
 	lastUnreserve  unreserveCall
+	held           map[string][]string
+}
+
+// hold records a reservation that exists before the test starts.
+func (c *countingPrism) hold(clientContext, ip string) {
+	if c.held == nil {
+		c.held = map[string][]string{}
+	}
+	c.held[clientContext] = append(c.held[clientContext], ip)
 }
 
 type unreserveCall struct {
@@ -593,7 +611,7 @@ type unreserveCall struct {
 
 func (c *countingPrism) Prism() *mock.MockPrism {
 	return &mock.MockPrism{
-		ReserveIPOverride: func(_ context.Context, _, _, _ string) (string, error) {
+		ReserveIPOverride: func(_ context.Context, _, _, clientContext string) (string, error) {
 			c.reserveCalls++
 			if c.onReserve != nil {
 				c.onReserve()
@@ -601,12 +619,23 @@ func (c *countingPrism) Prism() *mock.MockPrism {
 			if c.reserveErr != nil {
 				return "", c.reserveErr
 			}
+			c.hold(clientContext, c.ip)
 			return c.ip, nil
 		},
 		UnreserveIPOverride: func(_ context.Context, subnet, requestID, clientContext string) error {
 			c.unreserveCalls++
 			c.lastUnreserve = unreserveCall{subnet: subnet, requestID: requestID, clientContext: clientContext}
-			return c.unreserveErr
+			if c.unreserveErr != nil {
+				return c.unreserveErr
+			}
+			delete(c.held, clientContext)
+			return nil
+		},
+		ReservedIPsOverride: func(_ context.Context, _, clientContext string) ([]string, error) {
+			if c.reservedErr != nil {
+				return nil, c.reservedErr
+			}
+			return c.held[clientContext], nil
 		},
 	}
 }
@@ -730,4 +759,106 @@ func hasFinalizer(svc *v1.Service, finalizer string) bool {
 		}
 	}
 	return false
+}
+
+// A persisted address that Prism no longer holds must not be advertised. The
+// Service keeps its annotations if CCM dies between unreserve and the clearing
+// update, and MetalLB would otherwise announce an address Prism can hand to a
+// VM (NCN-113131).
+func TestAutoIPAMStaleIPAnnotationIsReReserved(t *testing.T) {
+	ctx := context.Background()
+	svc := reservedService("default", "web", "uid-web")
+	svc.Annotations[constants.LoadBalancerSubnetAnnotation] = "subnet-ext"
+	svc.Finalizers = nil
+
+	prism := &countingPrism{ip: "10.9.0.5"} // Prism holds nothing for uid-web.
+	kube, dyn := newClients(svc)
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+
+	status, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil)
+	if err != nil {
+		t.Fatalf("EnsureLoadBalancer: %v", err)
+	}
+	if prism.reserveCalls != 1 {
+		t.Fatalf("ReserveIP calls = %d, want 1", prism.reserveCalls)
+	}
+	if status.Ingress[0].IP != "10.9.0.5" {
+		t.Fatalf("status IP = %q, want the newly reserved 10.9.0.5", status.Ingress[0].IP)
+	}
+
+	got := mustGetService(t, kube, "default", "web")
+	if got.Annotations[constants.LoadBalancerIPAnnotation] != "10.9.0.5" {
+		t.Fatalf("IP annotation = %q, want 10.9.0.5", got.Annotations[constants.LoadBalancerIPAnnotation])
+	}
+	if id := got.Annotations[constants.LoadBalancerReservationIDAnnotation]; id == "res-1" || id == "" {
+		t.Fatalf("reservation id = %q, want a fresh id", id)
+	}
+	assertPool(t, mustGetPool(t, dyn, "metallb-system", "uid-web"), "uid-web",
+		got.Annotations[constants.LoadBalancerReservationIDAnnotation], "subnet-ext", "10.9.0.5")
+}
+
+// A confirm that cannot reach Prism must fail rather than fall through to
+// advertising an unconfirmed address.
+func TestAutoIPAMConfirmErrorDoesNotAdvertise(t *testing.T) {
+	ctx := context.Background()
+	svc := reservedService("default", "web", "uid-web")
+	svc.Annotations[constants.LoadBalancerSubnetAnnotation] = "subnet-ext"
+	svc.Finalizers = nil
+
+	prism := &countingPrism{ip: "10.9.0.6", reservedErr: errors.New("prism unavailable")}
+	kube, dyn := newClients(svc)
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+
+	if _, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil); err == nil {
+		t.Fatal("expected confirm error, got nil")
+	}
+	if prism.reserveCalls != 0 {
+		t.Fatalf("ReserveIP calls = %d, want 0", prism.reserveCalls)
+	}
+	if poolExists(t, dyn, "metallb-system", "uid-web") {
+		t.Fatal("an unconfirmed address was advertised")
+	}
+}
+
+// A confirmed reservation is left alone: no re-reserve, no annotation churn.
+func TestAutoIPAMHeldReservationIsKept(t *testing.T) {
+	ctx := context.Background()
+	svc := reservedService("default", "web", "uid-web")
+	svc.Annotations[constants.LoadBalancerSubnetAnnotation] = "subnet-ext"
+	svc.Finalizers = nil
+
+	prism := &countingPrism{ip: "10.9.0.7"}
+	prism.hold("uid-web", "10.4.0.1")
+	kube, dyn := newClients(svc)
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+
+	status, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil)
+	if err != nil {
+		t.Fatalf("EnsureLoadBalancer: %v", err)
+	}
+	if prism.reserveCalls != 0 || status.Ingress[0].IP != "10.4.0.1" {
+		t.Fatalf("reserveCalls=%d ip=%s, want 0 and 10.4.0.1", prism.reserveCalls, status.Ingress[0].IP)
+	}
+	got := mustGetService(t, kube, "default", "web")
+	if got.Annotations[constants.LoadBalancerReservationIDAnnotation] != "res-1" {
+		t.Fatalf("reservation id = %q, want res-1 kept",
+			got.Annotations[constants.LoadBalancerReservationIDAnnotation])
+	}
+}
+
+// Two reservations of the same Service must not share an unreserve request id:
+// Prism dedupes by replaying the first task, so a shared id would report a
+// release that never happened and leak the second address.
+func TestUnreserveRequestIDIsPerReservation(t *testing.T) {
+	first := unreserveRequestID("res-1")
+	second := unreserveRequestID("res-2")
+	if first == second {
+		t.Fatalf("request id %q reused across reservations", first)
+	}
+	if first != unreserveRequestID("res-1") {
+		t.Fatal("request id is not stable for one reservation, so a retry would not dedupe")
+	}
+	if unreserveRequestID("") == unreserveRequestID("") {
+		t.Fatal("an absent reservation id must yield a fresh request id")
+	}
 }

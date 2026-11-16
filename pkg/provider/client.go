@@ -59,6 +59,9 @@ const ipTaskPollInterval = time.Second
 // ipTaskWaitTimeout is the maximum time ReserveIP and UnreserveIP wait for a task.
 const ipTaskWaitTimeout = 2 * time.Minute
 
+// reservedIPPageSize is the page size ReservedIPs requests from Prism.
+const reservedIPPageSize = 100
+
 type nutanixClientEnvironment struct {
 	env               envtypes.Environment
 	config            config.Config
@@ -438,6 +441,73 @@ func (client *nutanixClient) UnreserveIP(ctx context.Context, subnetExtID, reque
 		return err
 	}
 	return nil
+}
+
+// ReservedIPs returns the addresses on subnetExtID reserved under clientContext.
+//
+// The subnet is paged and matched client-side rather than filtered with
+// $filter: a Prism that silently ignored the filter would return a truncated
+// page, and a caller would read "not reserved" for an address that is in fact
+// reserved. Server-side filtering is an optimisation for open item O-3.
+func (client *nutanixClient) ReservedIPs(ctx context.Context, subnetExtID, clientContext string) ([]string, error) {
+	if err := client.requireSubnetExtID(subnetExtID); err != nil {
+		return nil, err
+	}
+	if clientContext == "" {
+		return nil, fmt.Errorf("client context is required to list reserved IPs")
+	}
+	if client.convergedClient == nil || client.convergedClient.Subnets == nil {
+		return nil, fmt.Errorf("prism subnet client is not initialized")
+	}
+
+	matched := make([]string, 0, 1)
+	for page := 0; ; page++ {
+		resp, err := client.convergedClient.Subnets.ListReservedIpsBySubnetId(ctx, subnetExtID,
+			converged.WithPage(page),
+			converged.WithLimit(reservedIPPageSize),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("list reserved IPs on subnet %s: %w", subnetExtID, err)
+		}
+
+		rows, err := reservedIPRows(resp)
+		if err != nil {
+			return nil, fmt.Errorf("list reserved IPs on subnet %s: %w", subnetExtID, err)
+		}
+		for i := range rows {
+			row := &rows[i]
+			if row.ClientContext == nil || *row.ClientContext != clientContext {
+				continue
+			}
+			if row.Ipv4Address != nil && *row.Ipv4Address != "" {
+				matched = append(matched, *row.Ipv4Address)
+			}
+		}
+		if len(rows) < reservedIPPageSize {
+			return matched, nil
+		}
+	}
+}
+
+// reservedIPRows unwraps the reserved-IP list response. An empty subnet returns
+// a nil Data, which is not an error.
+func reservedIPRows(resp any) ([]subnetModels.ReservedIp, error) {
+	if resp == nil {
+		return nil, nil
+	}
+	listResp, ok := resp.(*subnetModels.ListSubnetReservedIpsApiResponse)
+	if !ok {
+		return nil, fmt.Errorf("unexpected reserved IP list response type %T", resp)
+	}
+	data := listResp.GetData()
+	if data == nil {
+		return nil, nil
+	}
+	rows, ok := data.([]subnetModels.ReservedIp)
+	if !ok {
+		return nil, fmt.Errorf("unexpected reserved IP list data type %T", data)
+	}
+	return rows, nil
 }
 
 // isReservationGone reports whether err means the reservation was already

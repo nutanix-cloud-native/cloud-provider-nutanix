@@ -19,6 +19,7 @@ package loadbalancer
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/google/uuid"
 	metallbv1beta1 "go.universe.tf/metallb/api/v1beta1"
@@ -31,6 +32,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	cloudprovider "k8s.io/cloud-provider"
+	klog "k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
@@ -164,7 +166,7 @@ func (s *AutoIPAMMetalLB) EnsureLoadBalancerDeleted(ctx context.Context, _ strin
 		if err != nil {
 			return err
 		}
-		if err := prism.UnreserveIP(ctx, subnet, unreserveRequestID(uid), uid); err != nil {
+		if err := prism.UnreserveIP(ctx, subnet, unreserveRequestID(reservationID), uid); err != nil {
 			return fmt.Errorf("unreserve service %s: %w", uid, err)
 		}
 	}
@@ -186,10 +188,17 @@ func (s *AutoIPAMMetalLB) EnsureLoadBalancerDeleted(ctx context.Context, _ strin
 	return nil
 }
 
-// unreserveRequestID is stable for a Service UID so a retry sends the same
-// NTNX-Request-Id after a CCM restart. It is not the reserve request id.
-func unreserveRequestID(serviceUID string) string {
-	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("ccm.nutanix.com/unreserve/"+serviceUID)).String()
+// unreserveRequestID is stable per reservation so a retry sends the same
+// NTNX-Request-Id after a CCM restart. It is keyed on the reservation id, not
+// the Service UID: Prism dedupes a repeated request id by replaying the first
+// task, so a UID-keyed id would make a later reservation of the same Service
+// report a successful release that never happened. An empty reservation id
+// yields a fresh id, which is safe because unreserve-by-context is idempotent.
+func unreserveRequestID(reservationID string) string {
+	if reservationID == "" {
+		return uuid.NewString()
+	}
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("ccm.nutanix.com/unreserve/"+reservationID)).String()
 }
 
 func (s *AutoIPAMMetalLB) activate(ctx context.Context, service *v1.Service) (string, error) {
@@ -213,6 +222,28 @@ func (s *AutoIPAMMetalLB) activate(ctx context.Context, service *v1.Service) (st
 	}
 
 	reservationID := serviceAnnotation(live, constants.LoadBalancerReservationIDAnnotation)
+	ip := serviceAnnotation(live, constants.LoadBalancerIPAnnotation)
+
+	// A persisted address is only trustworthy while Prism still holds it. Losing
+	// the race between unreserve and clearing the annotations (EnsureLoadBalancer
+	// Deleted clears them last) leaves an address that MetalLB would advertise
+	// with no reservation behind it, which is NCN-113131.
+	if ip != "" {
+		held, err := s.reservationHeld(ctx, reservationSubnet(live, s.config.Subnet), uid, ip)
+		if err != nil {
+			return "", err
+		}
+		if !held {
+			klog.Infof("service %s/%s: address %s is no longer reserved in Prism; reserving again",
+				live.Namespace, live.Name, ip)
+			live, err = s.updateService(ctx, live.Namespace, live.Name, clearReservationAnnotations)
+			if err != nil {
+				return "", fmt.Errorf("clear stale reservation: %w", err)
+			}
+			reservationID, ip = "", ""
+		}
+	}
+
 	if reservationID == "" {
 		reservationID = uuid.NewString()
 		live, err = s.updateService(ctx, live.Namespace, live.Name, func(svc *v1.Service) {
@@ -223,7 +254,6 @@ func (s *AutoIPAMMetalLB) activate(ctx context.Context, service *v1.Service) (st
 		}
 	}
 
-	ip := serviceAnnotation(live, constants.LoadBalancerIPAnnotation)
 	if ip == "" {
 		prism, err := s.prism()
 		if err != nil {
@@ -256,6 +286,31 @@ func (s *AutoIPAMMetalLB) activate(ctx context.Context, service *v1.Service) (st
 		return "", fmt.Errorf("set MetalLB requested IP: %w", err)
 	}
 	return ip, nil
+}
+
+// reservationHeld reports whether Prism still reserves ip under clientContext.
+func (s *AutoIPAMMetalLB) reservationHeld(ctx context.Context, subnet, clientContext, ip string) (bool, error) {
+	if subnet == "" {
+		return false, fmt.Errorf("cannot confirm reservation for %s: prism subnet extID is empty", clientContext)
+	}
+	prism, err := s.prism()
+	if err != nil {
+		return false, err
+	}
+	reserved, err := prism.ReservedIPs(ctx, subnet, clientContext)
+	if err != nil {
+		return false, fmt.Errorf("confirm reservation for %s: %w", clientContext, err)
+	}
+	return slices.Contains(reserved, ip), nil
+}
+
+// reservationSubnet prefers the subnet the address was reserved on over the
+// configured one, so a config change cannot redirect a confirm or a release.
+func reservationSubnet(service *v1.Service, configured string) string {
+	if stored := serviceAnnotation(service, constants.LoadBalancerSubnetAnnotation); stored != "" {
+		return stored
+	}
+	return configured
 }
 
 func (s *AutoIPAMMetalLB) ensurePool(ctx context.Context, namespace, name, ip, subnet, reservationID string) error {

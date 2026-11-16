@@ -34,9 +34,8 @@ type Client interface {
 
 var (
 	// ErrIPTaskPending means a Prism IP reserve or unreserve task did not reach a
-	// terminal status before the wait timed out. Callers retry. A reserve retry
-	// must reuse the same request id. An unreserve retry reuses the request id
-	// derived from the Service UID.
+	// terminal status before the wait timed out. Callers retry. Both a reserve and
+	// an unreserve retry must reuse the request id of the attempt they resume.
 	ErrIPTaskPending = errors.New("prism ip task is pending")
 
 	// ErrIPReservationTerminal means the reserve or unreserve task failed and will
@@ -56,6 +55,9 @@ type Prism interface {
 	// A reservation that is already gone returns nil. A wait timeout returns
 	// ErrIPTaskPending. A failed task returns ErrIPReservationTerminal.
 	UnreserveIP(ctx context.Context, subnetExtID, requestID, clientContext string) error
+	// ReservedIPs returns the addresses on subnetExtID currently reserved under
+	// clientContext. An empty result means that context holds no reservation.
+	ReservedIPs(ctx context.Context, subnetExtID, clientContext string) ([]string, error)
 	GetVM(ctx context.Context, vmUUID string) (*vmmModels.Vm, error)
 	GetVMByBiosUUid(ctx context.Context, biosUUID string) (*vmmModels.Vm, error)
 	GetCluster(ctx context.Context, clusterUUID string) (*clusterModels.Cluster, error)
