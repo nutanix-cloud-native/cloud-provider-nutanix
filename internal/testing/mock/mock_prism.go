@@ -42,6 +42,7 @@ type MockPrism struct {
 	ReserveIPOverride              func(ctx context.Context, subnetExtID, requestID, clientContext string) (string, error)
 	UnreserveIPOverride            func(ctx context.Context, subnetExtID, requestID, clientContext string) error
 	ReservedIPsOverride            func(ctx context.Context, subnetExtID, clientContext string) ([]string, error)
+	ResolveSubnetOverride          func(ctx context.Context, subnetExtIDOrName, cluster string) (string, error)
 }
 
 func (mp *MockPrism) IsProjectScoped(ctx context.Context) bool {
@@ -188,4 +189,13 @@ func (mp *MockPrism) ReservedIPs(ctx context.Context, subnetExtID, clientContext
 		return mp.ReservedIPsOverride(ctx, subnetExtID, clientContext)
 	}
 	return nil, fmt.Errorf("ReservedIPs not implemented")
+}
+
+// ResolveSubnet echoes subnetExtIDOrName unless an override is set, so a test
+// that configures an extID needs no stub.
+func (mp *MockPrism) ResolveSubnet(ctx context.Context, subnetExtIDOrName, cluster string) (string, error) {
+	if mp.ResolveSubnetOverride != nil {
+		return mp.ResolveSubnetOverride(ctx, subnetExtIDOrName, cluster)
+	}
+	return subnetExtIDOrName, nil
 }

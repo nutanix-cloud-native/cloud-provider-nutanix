@@ -22,10 +22,13 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
+	"github.com/google/uuid"
 	"github.com/nutanix-cloud-native/prism-go-client/converged"
 	convergedV4 "github.com/nutanix-cloud-native/prism-go-client/converged/v4"
 	"github.com/nutanix-cloud-native/prism-go-client/environment"
@@ -508,6 +511,168 @@ func reservedIPRows(resp any) ([]subnetModels.ReservedIp, error) {
 		return nil, fmt.Errorf("unexpected reserved IP list data type %T", data)
 	}
 	return rows, nil
+}
+
+// ResolveSubnet returns the extID of the subnet named by subnetExtIDOrName.
+//
+// A UUID is read back from Prism so a stale or cross-PC extID fails here rather
+// than at the first reserve. A name is resolved by listing subnets and matching
+// in Go. The server-side name filter is only an optimisation: Prism Central 7.6
+// answers HTTP 400 "Error while parsing URI" for a filter holding any non-ASCII
+// character, so a name it cannot express falls back to a full list. The name is
+// compared here either way, so the result never depends on the server's
+// matching rules.
+func (client *nutanixClient) ResolveSubnet(ctx context.Context, subnetExtIDOrName, cluster string) (string, error) {
+	if subnetExtIDOrName == "" {
+		return "", fmt.Errorf("subnet extID or name is required")
+	}
+	if client.convergedClient == nil || client.convergedClient.Subnets == nil {
+		return "", fmt.Errorf("prism subnet client is not initialized")
+	}
+
+	if _, err := uuid.Parse(subnetExtIDOrName); err == nil {
+		subnet, err := client.convergedClient.Subnets.Get(ctx, subnetExtIDOrName)
+		if err != nil {
+			return "", fmt.Errorf("get subnet %s: %w", subnetExtIDOrName, err)
+		}
+		if subnet == nil || subnet.ExtId == nil || *subnet.ExtId == "" {
+			return "", fmt.Errorf("subnet %s has no extID", subnetExtIDOrName)
+		}
+		return *subnet.ExtId, nil
+	}
+
+	clusterExtID := ""
+	if cluster != "" {
+		resolved, err := client.resolveCluster(ctx, cluster)
+		if err != nil {
+			return "", err
+		}
+		clusterExtID = resolved
+	}
+
+	subnets, err := client.listSubnetsByName(ctx, subnetExtIDOrName)
+	if err != nil {
+		return "", err
+	}
+
+	matched := matchSubnetsByName(subnets, subnetExtIDOrName, clusterExtID)
+	switch len(matched) {
+	case 1:
+		return matched[0], nil
+	case 0:
+		if cluster != "" {
+			return "", fmt.Errorf("no subnet named %q on cluster %q", subnetExtIDOrName, cluster)
+		}
+		return "", fmt.Errorf("no subnet named %q", subnetExtIDOrName)
+	default:
+		return "", fmt.Errorf("subnet name %q matches %d subnets (%s); use the subnet extID instead",
+			subnetExtIDOrName, len(matched), strings.Join(matched, ", "))
+	}
+}
+
+// listSubnetsByName lists candidate subnets for a name. A filter rejected by
+// Prism degrades to a full list rather than an error, because the caller
+// matches the name itself.
+func (client *nutanixClient) listSubnetsByName(ctx context.Context, name string) ([]subnetModels.Subnet, error) {
+	if isASCII(name) {
+		filter := fmt.Sprintf("name eq '%s'", strings.ReplaceAll(name, "'", "''"))
+		subnets, err := client.convergedClient.Subnets.List(ctx, converged.WithFilter(filter))
+		if err == nil {
+			return subnets, nil
+		}
+		klog.V(2).Infof("subnet name filter %q was rejected, listing all subnets: %v", filter, err)
+	}
+
+	subnets, err := client.convergedClient.Subnets.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list subnets: %w", err)
+	}
+	return subnets, nil
+}
+
+// resolveCluster returns the extID of the Prism Element named by
+// clusterExtIDOrName. Clusters are few, so a name is matched against the full
+// list rather than through a filter.
+func (client *nutanixClient) resolveCluster(ctx context.Context, clusterExtIDOrName string) (string, error) {
+	if _, err := uuid.Parse(clusterExtIDOrName); err == nil {
+		cluster, err := client.GetCluster(ctx, clusterExtIDOrName)
+		if err != nil {
+			return "", fmt.Errorf("get cluster %s: %w", clusterExtIDOrName, err)
+		}
+		if cluster == nil || cluster.ExtId == nil || *cluster.ExtId == "" {
+			return "", fmt.Errorf("cluster %s has no extID", clusterExtIDOrName)
+		}
+		return *cluster.ExtId, nil
+	}
+
+	clusters, err := client.ListAllCluster(ctx)
+	if err != nil {
+		return "", fmt.Errorf("list clusters: %w", err)
+	}
+	matched := make([]string, 0, 1)
+	for i := range clusters {
+		cluster := &clusters[i]
+		if cluster.Name == nil || *cluster.Name != clusterExtIDOrName {
+			continue
+		}
+		if cluster.ExtId != nil && *cluster.ExtId != "" {
+			matched = append(matched, *cluster.ExtId)
+		}
+	}
+	switch len(matched) {
+	case 1:
+		return matched[0], nil
+	case 0:
+		return "", fmt.Errorf("no cluster named %q", clusterExtIDOrName)
+	default:
+		return "", fmt.Errorf("cluster name %q matches %d clusters; use the cluster extID instead",
+			clusterExtIDOrName, len(matched))
+	}
+}
+
+// matchSubnetsByName returns the extIDs of the subnets named exactly name. The
+// comparison is byte-exact: Prism treats subnet names as case-sensitive, and
+// two names that differ only by Unicode case folding are two distinct subnets.
+func matchSubnetsByName(subnets []subnetModels.Subnet, name, clusterExtID string) []string {
+	matched := make([]string, 0, 1)
+	for i := range subnets {
+		subnet := &subnets[i]
+		if subnet.Name == nil || *subnet.Name != name {
+			continue
+		}
+		if subnet.ExtId == nil || *subnet.ExtId == "" {
+			continue
+		}
+		// An overlay subnet declares no cluster. Narrowing it away would make it
+		// unreachable by name, since the cluster is filled in automatically
+		// whenever a name is used, so only cluster-scoped subnets are narrowed.
+		if clusterExtID != "" && subnetDeclaresCluster(subnet) && !subnetInCluster(subnet, clusterExtID) {
+			continue
+		}
+		matched = append(matched, *subnet.ExtId)
+	}
+	return matched
+}
+
+func subnetDeclaresCluster(subnet *subnetModels.Subnet) bool {
+	return (subnet.ClusterReference != nil && *subnet.ClusterReference != "") ||
+		len(subnet.ClusterReferenceList) > 0
+}
+
+func subnetInCluster(subnet *subnetModels.Subnet, clusterExtID string) bool {
+	if subnet.ClusterReference != nil && *subnet.ClusterReference == clusterExtID {
+		return true
+	}
+	return slices.Contains(subnet.ClusterReferenceList, clusterExtID)
+}
+
+func isASCII(value string) bool {
+	for i := 0; i < len(value); i++ {
+		if value[i] > unicode.MaxASCII {
+			return false
+		}
+	}
+	return true
 }
 
 // isReservationGone reports whether err means the reservation was already

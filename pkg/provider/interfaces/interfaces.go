@@ -58,6 +58,12 @@ type Prism interface {
 	// ReservedIPs returns the addresses on subnetExtID currently reserved under
 	// clientContext. An empty result means that context holds no reservation.
 	ReservedIPs(ctx context.Context, subnetExtID, clientContext string) ([]string, error)
+	// ResolveSubnet returns the extID of the subnet named by subnetExtIDOrName.
+	// A value that parses as a UUID is read back from Prism and returned. A name
+	// must match exactly one subnet; cluster, a Prism Element name or extID,
+	// narrows subnets that declare a cluster. An ambiguous name is an error
+	// rather than a guess.
+	ResolveSubnet(ctx context.Context, subnetExtIDOrName, cluster string) (string, error)
 	GetVM(ctx context.Context, vmUUID string) (*vmmModels.Vm, error)
 	GetVMByBiosUUid(ctx context.Context, biosUUID string) (*vmmModels.Vm, error)
 	GetCluster(ctx context.Context, clusterUUID string) (*clusterModels.Cluster, error)

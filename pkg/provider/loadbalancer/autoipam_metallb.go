@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sync"
 
 	"github.com/google/uuid"
 	metallbv1beta1 "go.universe.tf/metallb/api/v1beta1"
@@ -54,6 +55,12 @@ var ipAddressPoolGVR = schema.GroupVersionResource{
 type AutoIPAMMetalLB struct {
 	config config.AutoIPAMMetalLB
 	deps   Dependencies
+
+	// mu guards subnetCache, the memoised result of resolving config.Subnet to a
+	// Prism extID. Resolution is deferred to the first Service rather than done
+	// at startup so an unreachable Prism does not crash-loop the CCM.
+	mu          sync.Mutex
+	subnetCache string
 }
 
 var _ Strategy = (*AutoIPAMMetalLB)(nil)
@@ -156,11 +163,14 @@ func (s *AutoIPAMMetalLB) EnsureLoadBalancerDeleted(ctx context.Context, _ strin
 	// record of the reservation when the Service annotations are already gone.
 	// Deleting the pool first would drop that record if unreserve then failed.
 	if reservationID != "" || ip != "" {
+		// The recorded subnet is already an extID. Only a reservation whose record
+		// was lost falls back to the configured subnet, which may be a name.
 		if subnet == "" {
-			subnet = s.config.Subnet
-		}
-		if subnet == "" {
-			return fmt.Errorf("cannot unreserve service %s: prism subnet extID is empty", uid)
+			resolved, err := s.subnetExtID(ctx)
+			if err != nil {
+				return fmt.Errorf("cannot unreserve service %s: %w", uid, err)
+			}
+			subnet = resolved
 		}
 		prism, err := s.prism()
 		if err != nil {
@@ -205,10 +215,15 @@ func (s *AutoIPAMMetalLB) activate(ctx context.Context, service *v1.Service) (st
 	if service == nil {
 		return "", fmt.Errorf("service is required")
 	}
-	if s.config.Subnet == "" {
-		return "", fmt.Errorf("loadBalancer.autoIPAMMetalLB.subnet is empty; set the Prism subnet extID before using strategy %s", StrategyAutoIPAMMetalLB)
-	}
 	if _, _, err := s.clients(); err != nil {
+		return "", err
+	}
+
+	// Resolve the configured subnet before any write. Everything persisted on the
+	// Service and the pool is the extID, so a later config change from a name to
+	// its own extID (or back) cannot orphan a reservation.
+	subnetExtID, err := s.subnetExtID(ctx)
+	if err != nil {
 		return "", err
 	}
 
@@ -229,7 +244,7 @@ func (s *AutoIPAMMetalLB) activate(ctx context.Context, service *v1.Service) (st
 	// Deleted clears them last) leaves an address that MetalLB would advertise
 	// with no reservation behind it, which is NCN-113131.
 	if ip != "" {
-		held, err := s.reservationHeld(ctx, reservationSubnet(live, s.config.Subnet), uid, ip)
+		held, err := s.reservationHeld(ctx, reservationSubnet(live, subnetExtID), uid, ip)
 		if err != nil {
 			return "", err
 		}
@@ -259,7 +274,7 @@ func (s *AutoIPAMMetalLB) activate(ctx context.Context, service *v1.Service) (st
 		if err != nil {
 			return "", err
 		}
-		reserved, reserveErr := prism.ReserveIP(ctx, s.config.Subnet, reservationID, uid)
+		reserved, reserveErr := prism.ReserveIP(ctx, subnetExtID, reservationID, uid)
 		if reserveErr != nil {
 			// Keep the reservation id on every failure, including terminal Prism
 			// errors. Clearing it made each Service-controller retry mint a new
@@ -269,14 +284,14 @@ func (s *AutoIPAMMetalLB) activate(ctx context.Context, service *v1.Service) (st
 		ip = reserved
 		live, err = s.updateService(ctx, live.Namespace, live.Name, func(svc *v1.Service) {
 			setServiceAnnotation(svc, constants.LoadBalancerIPAnnotation, ip)
-			setServiceAnnotation(svc, constants.LoadBalancerSubnetAnnotation, s.config.Subnet)
+			setServiceAnnotation(svc, constants.LoadBalancerSubnetAnnotation, subnetExtID)
 		})
 		if err != nil {
 			return "", fmt.Errorf("persist reserved IP: %w", err)
 		}
 	}
 
-	if err := s.ensurePool(ctx, s.metalLBNamespace(), uid, ip, s.config.Subnet, reservationID); err != nil {
+	if err := s.ensurePool(ctx, s.metalLBNamespace(), uid, ip, subnetExtID, reservationID); err != nil {
 		return "", err
 	}
 
@@ -286,6 +301,38 @@ func (s *AutoIPAMMetalLB) activate(ctx context.Context, service *v1.Service) (st
 		return "", fmt.Errorf("set MetalLB requested IP: %w", err)
 	}
 	return ip, nil
+}
+
+// subnetExtID resolves the configured subnet to a Prism extID, once per process.
+// Only a successful resolution is cached, so a transient Prism failure is
+// retried with the Service rather than remembered.
+func (s *AutoIPAMMetalLB) subnetExtID(ctx context.Context) (string, error) {
+	if s.config.Subnet == "" {
+		return "", fmt.Errorf("loadBalancer.autoIPAMMetalLB.subnet is empty; set the Prism subnet extID or name before using strategy %s", StrategyAutoIPAMMetalLB)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.subnetCache != "" {
+		return s.subnetCache, nil
+	}
+
+	prism, err := s.prism()
+	if err != nil {
+		return "", err
+	}
+	extID, err := prism.ResolveSubnet(ctx, s.config.Subnet, s.config.Cluster)
+	if err != nil {
+		return "", fmt.Errorf("resolve subnet %q: %w", s.config.Subnet, err)
+	}
+	if extID == "" {
+		return "", fmt.Errorf("resolve subnet %q: prism returned an empty extID", s.config.Subnet)
+	}
+	if extID != s.config.Subnet {
+		klog.Infof("resolved loadBalancer.autoIPAMMetalLB.subnet %q to extID %s", s.config.Subnet, extID)
+	}
+	s.subnetCache = extID
+	return extID, nil
 }
 
 // reservationHeld reports whether Prism still reserves ip under clientContext.

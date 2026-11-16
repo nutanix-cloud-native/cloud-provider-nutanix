@@ -47,9 +47,14 @@ type LoadBalancer struct {
 // AutoIPAMMetalLB configures reservation of one Prism address per Service and
 // the MetalLB pool that announces it.
 type AutoIPAMMetalLB struct {
-	// Subnet is the Prism subnet extID addresses are reserved from. Empty makes
-	// activation fail before any Prism or MetalLB write.
+	// Subnet is the Prism subnet addresses are reserved from, either an extID or
+	// a subnet name. Empty makes activation fail before any Prism or MetalLB
+	// write.
 	Subnet string `json:"subnet,omitempty"`
+	// Cluster narrows a Subnet given by name to one Prism Element, by cluster
+	// name or extID. It is only consulted when Subnet is a name, and only for
+	// subnets that declare a cluster.
+	Cluster string `json:"cluster,omitempty"`
 	// MetalLBNamespace is the namespace of the per-Service IPAddressPool.
 	// Empty defaults to metallb-system.
 	MetalLBNamespace string `json:"metalLBNamespace,omitempty"`

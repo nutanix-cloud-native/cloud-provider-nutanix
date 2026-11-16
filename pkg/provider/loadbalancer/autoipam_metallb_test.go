@@ -19,6 +19,7 @@ package loadbalancer
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
@@ -46,11 +47,14 @@ func TestAutoIPAMEmptySubnetSkipsReserveAndPool(t *testing.T) {
 	kube, dyn := newClients(lbService("default", "web", "uid-web"))
 	strategy := newAutoStrategy(config.AutoIPAMMetalLB{}, prism.Prism(), kube, dyn)
 
-	if _, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil); err == nil {
-		t.Fatal("expected error for empty subnet, got nil")
+	_, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil)
+	if err == nil || !strings.Contains(err.Error(), "loadBalancer.autoIPAMMetalLB.subnet is empty") {
+		t.Fatalf("error = %v, want the empty-subnet message", err)
 	}
-	if prism.reserveCalls != 0 {
-		t.Fatalf("ReserveIP calls = %d, want 0", prism.reserveCalls)
+	// The check belongs before subnet resolution, so an unset subnet is a config
+	// error rather than a Prism round trip that fails as "no subnet named".
+	if prism.resolveCalls != 0 || prism.reserveCalls != 0 {
+		t.Fatalf("prism was called: resolve=%d reserve=%d", prism.resolveCalls, prism.reserveCalls)
 	}
 	if poolExists(t, dyn, defaultMetalLBNamespace, "uid-web") {
 		t.Fatal("empty subnet created a pool")
@@ -588,12 +592,18 @@ func TestAutoIPAMEnsureDeletedMissingSubnet(t *testing.T) {
 type countingPrism struct {
 	reserveCalls   int
 	unreserveCalls int
+	resolveCalls   int
 	ip             string
+	lastSubnet     string
+	resolveTo      string
 	reserveErr     error
 	unreserveErr   error
 	reservedErr    error
+	resolveErr     error
 	onReserve      func()
+	onResolve      func()
 	lastUnreserve  unreserveCall
+	lastResolve    resolveCall
 	held           map[string][]string
 }
 
@@ -609,10 +619,29 @@ type unreserveCall struct {
 	subnet, requestID, clientContext string
 }
 
+type resolveCall struct {
+	subnet, cluster string
+}
+
 func (c *countingPrism) Prism() *mock.MockPrism {
 	return &mock.MockPrism{
-		ReserveIPOverride: func(_ context.Context, _, _, clientContext string) (string, error) {
+		ResolveSubnetOverride: func(_ context.Context, subnetExtIDOrName, cluster string) (string, error) {
+			c.resolveCalls++
+			c.lastResolve = resolveCall{subnet: subnetExtIDOrName, cluster: cluster}
+			if c.onResolve != nil {
+				c.onResolve()
+			}
+			if c.resolveErr != nil {
+				return "", c.resolveErr
+			}
+			if c.resolveTo != "" {
+				return c.resolveTo, nil
+			}
+			return subnetExtIDOrName, nil
+		},
+		ReserveIPOverride: func(_ context.Context, subnet, _, clientContext string) (string, error) {
 			c.reserveCalls++
+			c.lastSubnet = subnet
 			if c.onReserve != nil {
 				c.onReserve()
 			}
@@ -860,5 +889,141 @@ func TestUnreserveRequestIDIsPerReservation(t *testing.T) {
 	}
 	if unreserveRequestID("") == unreserveRequestID("") {
 		t.Fatal("an absent reservation id must yield a fresh request id")
+	}
+}
+
+// A subnet name is resolved to an extID once per process, and the extID is what
+// is reserved, annotated and labelled. Nothing persists the name, so a later
+// config change between a name and its own extID cannot orphan a reservation.
+func TestAutoIPAMResolvesSubnetNameOnce(t *testing.T) {
+	ctx := context.Background()
+	web := lbService("default", "web", "uid-web")
+	api := lbService("default", "api", "uid-api")
+
+	prism := &countingPrism{ip: "10.4.0.1", resolveTo: "subnet-uuid"}
+	kube, dyn := newClients(web, api)
+	cfg := config.AutoIPAMMetalLB{Subnet: "vlan170", Cluster: "pe-1", MetalLBNamespace: "metallb-system"}
+	strategy := newAutoStrategy(cfg, prism.Prism(), kube, dyn)
+
+	for _, name := range []string{"web", "api"} {
+		if _, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", name), nil); err != nil {
+			t.Fatalf("EnsureLoadBalancer %s: %v", name, err)
+		}
+	}
+
+	if prism.resolveCalls != 1 {
+		t.Fatalf("ResolveSubnet calls = %d, want 1 (memoised)", prism.resolveCalls)
+	}
+	if prism.lastResolve != (resolveCall{subnet: "vlan170", cluster: "pe-1"}) {
+		t.Fatalf("ResolveSubnet args = %#v, want the configured name and cluster", prism.lastResolve)
+	}
+	if prism.lastSubnet != "subnet-uuid" {
+		t.Fatalf("ReserveIP subnet = %q, want the resolved extID", prism.lastSubnet)
+	}
+
+	got := mustGetService(t, kube, "default", "web")
+	if subnet := got.Annotations[constants.LoadBalancerSubnetAnnotation]; subnet != "subnet-uuid" {
+		t.Fatalf("subnet annotation = %q, want the resolved extID", subnet)
+	}
+	assertPool(t, mustGetPool(t, dyn, "metallb-system", "uid-web"), "uid-web",
+		got.Annotations[constants.LoadBalancerReservationIDAnnotation], "subnet-uuid", "10.4.0.1")
+}
+
+// A name that cannot be resolved must fail before any reservation or pool, so
+// an ambiguous or absent subnet never reserves an address nobody can release.
+func TestAutoIPAMResolveErrorBlocksReserve(t *testing.T) {
+	ctx := context.Background()
+	svc := lbService("default", "web", "uid-web")
+
+	prism := &countingPrism{ip: "10.4.0.1", resolveErr: errors.New(`subnet name "shared" matches 2 subnets`)}
+	kube, dyn := newClients(svc)
+	cfg := config.AutoIPAMMetalLB{Subnet: "shared", MetalLBNamespace: "metallb-system"}
+	strategy := newAutoStrategy(cfg, prism.Prism(), kube, dyn)
+
+	if _, err := strategy.EnsureLoadBalancer(ctx, "cluster", svc, nil); err == nil {
+		t.Fatal("EnsureLoadBalancer succeeded with an unresolvable subnet")
+	}
+	if prism.reserveCalls != 0 {
+		t.Fatalf("ReserveIP calls = %d, want 0", prism.reserveCalls)
+	}
+	if poolExists(t, dyn, "metallb-system", "uid-web") {
+		t.Fatal("a pool was created for an unresolvable subnet")
+	}
+	if mustGetService(t, kube, "default", "web").Annotations[constants.LoadBalancerReservationIDAnnotation] != "" {
+		t.Fatal("a reservation id was persisted for an unresolvable subnet")
+	}
+}
+
+// Only a successful resolution is cached, so a Prism outage at the first
+// Service does not wedge the strategy for the life of the process.
+func TestAutoIPAMResolveErrorIsNotCached(t *testing.T) {
+	ctx := context.Background()
+	svc := lbService("default", "web", "uid-web")
+
+	prism := &countingPrism{ip: "10.4.0.1", resolveTo: "subnet-uuid", resolveErr: errors.New("prism unavailable")}
+	kube, dyn := newClients(svc)
+	cfg := config.AutoIPAMMetalLB{Subnet: "vlan170", MetalLBNamespace: "metallb-system"}
+	strategy := newAutoStrategy(cfg, prism.Prism(), kube, dyn)
+
+	if _, err := strategy.EnsureLoadBalancer(ctx, "cluster", svc, nil); err == nil {
+		t.Fatal("EnsureLoadBalancer succeeded while Prism was unavailable")
+	}
+
+	prism.resolveErr = nil
+	if _, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil); err != nil {
+		t.Fatalf("EnsureLoadBalancer retry: %v", err)
+	}
+	if prism.resolveCalls != 2 {
+		t.Fatalf("ResolveSubnet calls = %d, want 2 (the failure is not cached)", prism.resolveCalls)
+	}
+	if prism.lastSubnet != "subnet-uuid" {
+		t.Fatalf("ReserveIP subnet = %q, want the resolved extID", prism.lastSubnet)
+	}
+}
+
+// Delete uses the recorded subnet without resolving. The record is already an
+// extID, and resolving would send a needless Prism call on every teardown.
+func TestAutoIPAMDeleteUsesRecordedSubnetWithoutResolving(t *testing.T) {
+	ctx := context.Background()
+	svc := reservedService("default", "web", "uid-web")
+
+	prism := &countingPrism{ip: "10.4.0.1", resolveTo: "subnet-uuid"}
+	prism.hold("uid-web", "10.4.0.1")
+	kube, dyn := newClients(svc)
+	cfg := config.AutoIPAMMetalLB{Subnet: "vlan170", MetalLBNamespace: "metallb-system"}
+	strategy := newAutoStrategy(cfg, prism.Prism(), kube, dyn)
+
+	if err := strategy.EnsureLoadBalancerDeleted(ctx, "cluster", svc); err != nil {
+		t.Fatalf("EnsureLoadBalancerDeleted: %v", err)
+	}
+	if prism.resolveCalls != 0 {
+		t.Fatalf("ResolveSubnet calls = %d, want 0", prism.resolveCalls)
+	}
+	if prism.lastUnreserve.subnet != "stored-subnet" {
+		t.Fatalf("UnreserveIP subnet = %q, want the recorded subnet", prism.lastUnreserve.subnet)
+	}
+}
+
+// A reservation whose subnet record was lost falls back to the configured
+// subnet, which must be resolved before it reaches Prism.
+func TestAutoIPAMDeleteResolvesWhenSubnetRecordIsLost(t *testing.T) {
+	ctx := context.Background()
+	svc := reservedService("default", "web", "uid-web")
+	delete(svc.Annotations, constants.LoadBalancerSubnetAnnotation)
+
+	prism := &countingPrism{ip: "10.4.0.1", resolveTo: "subnet-uuid"}
+	prism.hold("uid-web", "10.4.0.1")
+	kube, dyn := newClients(svc)
+	cfg := config.AutoIPAMMetalLB{Subnet: "vlan170", Cluster: "pe-1", MetalLBNamespace: "metallb-system"}
+	strategy := newAutoStrategy(cfg, prism.Prism(), kube, dyn)
+
+	if err := strategy.EnsureLoadBalancerDeleted(ctx, "cluster", mustGetService(t, kube, "default", "web")); err != nil {
+		t.Fatalf("EnsureLoadBalancerDeleted: %v", err)
+	}
+	if prism.resolveCalls != 1 {
+		t.Fatalf("ResolveSubnet calls = %d, want 1", prism.resolveCalls)
+	}
+	if prism.lastUnreserve.subnet != "subnet-uuid" {
+		t.Fatalf("UnreserveIP subnet = %q, want the resolved extID", prism.lastUnreserve.subnet)
 	}
 }

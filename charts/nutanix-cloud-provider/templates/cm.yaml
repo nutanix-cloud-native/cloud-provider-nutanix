@@ -28,6 +28,7 @@ data:
         "defaultStrategy": {{ .Values.loadBalancer.defaultStrategy | default "None" | toJson }},
         "autoIPAMMetalLB": {
           "subnet": {{ dig "autoIPAMMetalLB" "subnet" "" .Values.loadBalancer | toJson }},
+          "cluster": {{ dig "autoIPAMMetalLB" "cluster" "" .Values.loadBalancer | toJson }},
           "metalLBNamespace": {{ dig "autoIPAMMetalLB" "metalLBNamespace" "metallb-system" .Values.loadBalancer | toJson }}
         }
       },

@@ -50,9 +50,13 @@ loadBalancer:
   # fields. A Service opts in with
   # ccm.nutanix.com/load-balancer-strategy=AutoIPAMMetalLB.
   autoIPAMMetalLB:
-    # subnet is the Prism subnet extID CCM reserves Service addresses from.
+    # subnet is the Prism subnet CCM reserves Service addresses from, either an
+    # extID or a subnet name.
     # Empty makes activation fail before any reservation or MetalLB pool is created.
     subnet: ""
+    # cluster narrows a subnet given by name to one Prism Element, by cluster
+    # name or extID. Ignored when subnet is an extID.
+    cluster: ""
     # metalLBNamespace is where CCM creates per-Service /32 IPAddressPools.
     # Empty defaults to metallb-system.
     metalLBNamespace: "metallb-system"
