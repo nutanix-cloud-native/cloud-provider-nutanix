@@ -55,6 +55,12 @@ type AutoIPAMMetalLB struct {
 	// name or extID. It is only consulted when Subnet is a name, and only for
 	// subnets that declare a cluster.
 	Cluster string `json:"cluster,omitempty"`
+	// ClusterUID is the UID of this workload cluster's CAPI Cluster object. It
+	// is half of the reservation identity Prism stores, which is what lets the
+	// management cluster release this cluster's addresses after the workload
+	// cluster is gone. The CCM cannot derive it, so activation fails when it is
+	// empty.
+	ClusterUID string `json:"clusterUID,omitempty"`
 	// MetalLBNamespace is the namespace of the per-Service IPAddressPool.
 	// Empty defaults to metallb-system.
 	MetalLBNamespace string `json:"metalLBNamespace,omitempty"`

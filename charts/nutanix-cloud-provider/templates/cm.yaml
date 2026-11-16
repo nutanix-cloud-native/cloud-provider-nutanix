@@ -29,6 +29,7 @@ data:
         "autoIPAMMetalLB": {
           "subnet": {{ dig "autoIPAMMetalLB" "subnet" "" .Values.loadBalancer | toJson }},
           "cluster": {{ dig "autoIPAMMetalLB" "cluster" "" .Values.loadBalancer | toJson }},
+          "clusterUID": {{ dig "autoIPAMMetalLB" "clusterUID" "" .Values.loadBalancer | toJson }},
           "metalLBNamespace": {{ dig "autoIPAMMetalLB" "metalLBNamespace" "metallb-system" .Values.loadBalancer | toJson }}
         }
       },

@@ -172,11 +172,17 @@ func (s *AutoIPAMMetalLB) EnsureLoadBalancerDeleted(ctx context.Context, _ strin
 			}
 			subnet = resolved
 		}
+		reservationContext, err := serviceClientContext(s.config.ClusterUID, uid)
+		if err != nil {
+			return err
+		}
 		prism, err := s.prism()
 		if err != nil {
 			return err
 		}
-		if err := prism.UnreserveIP(ctx, subnet, unreserveRequestID(reservationID), uid); err != nil {
+		// Unreserve releases every address under the context, so a Service that
+		// somehow holds more than one is cleaned up in a single call.
+		if err := prism.UnreserveIP(ctx, subnet, unreserveRequestID(reservationID), reservationContext); err != nil {
 			return fmt.Errorf("unreserve service %s: %w", uid, err)
 		}
 	}
@@ -236,27 +242,34 @@ func (s *AutoIPAMMetalLB) activate(ctx context.Context, service *v1.Service) (st
 		return "", err
 	}
 
+	reservationContext, err := serviceClientContext(s.config.ClusterUID, uid)
+	if err != nil {
+		return "", err
+	}
+
 	reservationID := serviceAnnotation(live, constants.LoadBalancerReservationIDAnnotation)
 	ip := serviceAnnotation(live, constants.LoadBalancerIPAnnotation)
+
+	// One list answers both questions this reconcile has for Prism: is the
+	// address we persisted still reserved, and does this context already hold an
+	// address we never managed to record? It is never cached across reconciles.
+	held, err := s.reservedForContext(ctx, reservationSubnet(live, subnetExtID), reservationContext)
+	if err != nil {
+		return "", err
+	}
 
 	// A persisted address is only trustworthy while Prism still holds it. Losing
 	// the race between unreserve and clearing the annotations (EnsureLoadBalancer
 	// Deleted clears them last) leaves an address that MetalLB would advertise
 	// with no reservation behind it, which is NCN-113131.
-	if ip != "" {
-		held, err := s.reservationHeld(ctx, reservationSubnet(live, subnetExtID), uid, ip)
+	if ip != "" && !slices.Contains(held, ip) {
+		klog.Infof("service %s/%s: address %s is no longer reserved in Prism; reserving again",
+			live.Namespace, live.Name, ip)
+		live, err = s.updateService(ctx, live.Namespace, live.Name, clearReservationAnnotations)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("clear stale reservation: %w", err)
 		}
-		if !held {
-			klog.Infof("service %s/%s: address %s is no longer reserved in Prism; reserving again",
-				live.Namespace, live.Name, ip)
-			live, err = s.updateService(ctx, live.Namespace, live.Name, clearReservationAnnotations)
-			if err != nil {
-				return "", fmt.Errorf("clear stale reservation: %w", err)
-			}
-			reservationID, ip = "", ""
-		}
+		reservationID, ip = "", ""
 	}
 
 	if reservationID == "" {
@@ -269,12 +282,33 @@ func (s *AutoIPAMMetalLB) activate(ctx context.Context, service *v1.Service) (st
 		}
 	}
 
+	// Adopt before reserving. A reserve whose address we failed to persist, or
+	// whose task timed out and then succeeded, has left an address under this
+	// context that only Prism knows about; reserving again would leak it.
+	if ip == "" && len(held) > 0 {
+		ip = held[0]
+		if len(held) > 1 {
+			klog.Warningf("service %s/%s: %d addresses are reserved for this Service (%v); adopting %s. The rest are released with the Service, because unreserve releases the whole context",
+				live.Namespace, live.Name, len(held), held, ip)
+		} else {
+			klog.Infof("service %s/%s: adopting address %s already reserved for this Service",
+				live.Namespace, live.Name, ip)
+		}
+		live, err = s.updateService(ctx, live.Namespace, live.Name, func(svc *v1.Service) {
+			setServiceAnnotation(svc, constants.LoadBalancerIPAnnotation, ip)
+			setServiceAnnotation(svc, constants.LoadBalancerSubnetAnnotation, subnetExtID)
+		})
+		if err != nil {
+			return "", fmt.Errorf("persist adopted IP: %w", err)
+		}
+	}
+
 	if ip == "" {
 		prism, err := s.prism()
 		if err != nil {
 			return "", err
 		}
-		reserved, reserveErr := prism.ReserveIP(ctx, subnetExtID, reservationID, uid)
+		reserved, reserveErr := prism.ReserveIP(ctx, subnetExtID, reservationID, reservationContext)
 		if reserveErr != nil {
 			// Keep the reservation id on every failure, including terminal Prism
 			// errors. Clearing it made each Service-controller retry mint a new
@@ -335,20 +369,22 @@ func (s *AutoIPAMMetalLB) subnetExtID(ctx context.Context) (string, error) {
 	return extID, nil
 }
 
-// reservationHeld reports whether Prism still reserves ip under clientContext.
-func (s *AutoIPAMMetalLB) reservationHeld(ctx context.Context, subnet, clientContext, ip string) (bool, error) {
+// reservedForContext returns the addresses Prism holds under clientContext, in
+// a stable order so adoption picks the same address on every retry.
+func (s *AutoIPAMMetalLB) reservedForContext(ctx context.Context, subnet, clientContext string) ([]string, error) {
 	if subnet == "" {
-		return false, fmt.Errorf("cannot confirm reservation for %s: prism subnet extID is empty", clientContext)
+		return nil, fmt.Errorf("cannot read reservations for %s: prism subnet extID is empty", clientContext)
 	}
 	prism, err := s.prism()
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	reserved, err := prism.ReservedIPs(ctx, subnet, clientContext)
 	if err != nil {
-		return false, fmt.Errorf("confirm reservation for %s: %w", clientContext, err)
+		return nil, fmt.Errorf("read reservations for %s: %w", clientContext, err)
 	}
-	return slices.Contains(reserved, ip), nil
+	slices.Sort(reserved)
+	return reserved, nil
 }
 
 // reservationSubnet prefers the subnet the address was reserved on over the

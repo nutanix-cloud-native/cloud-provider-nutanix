@@ -57,6 +57,11 @@ loadBalancer:
     # cluster narrows a subnet given by name to one Prism Element, by cluster
     # name or extID. Ignored when subnet is an extID.
     cluster: ""
+    # clusterUID is the UID of this cluster's CAPI Cluster object. It is half of
+    # the reservation identity stored on Prism, so the management cluster can
+    # release this cluster's addresses after the cluster itself is gone.
+    # Empty makes activation fail before any reservation.
+    clusterUID: ""
     # metalLBNamespace is where CCM creates per-Service /32 IPAddressPools.
     # Empty defaults to metallb-system.
     metalLBNamespace: "metallb-system"
