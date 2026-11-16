@@ -68,8 +68,9 @@ const (
 	// LoadBalancerSubnetLabel is the Prism subnet extID copied onto the IPAddressPool.
 	LoadBalancerSubnetLabel string = LoadBalancerSubnetAnnotation
 	// LoadBalancerPoolTypeLabel selects AutoIPAMMetalLB pools from an L2Advertisement
-	// ipAddressPoolSelectors match.
-	LoadBalancerPoolTypeLabel string = "pool-type"
+	// ipAddressPoolSelectors match. It is the CAREN/CCM contract, so it is
+	// domain-qualified to keep it out of the end-user label space.
+	LoadBalancerPoolTypeLabel string = "ccm.nutanix.com/load-balancer-pool-type"
 	// LoadBalancerPoolTypeAutoIPAMMetalLB is the pool-type value for AutoIPAMMetalLB.
 	LoadBalancerPoolTypeAutoIPAMMetalLB string = "auto-ipam-metallb"
 )
