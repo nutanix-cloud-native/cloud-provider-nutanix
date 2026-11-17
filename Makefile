@@ -96,7 +96,8 @@ GINKGO_NODES  ?= 1
 E2E_DIR ?= ${REPO_ROOT}/test/e2e
 E2E_CONF_FILE  ?= ${E2E_DIR}/config/nutanix.yaml
 GINKGO_NOCOLOR ?= false
-LABEL_FILTERS = ""
+# Overridable from CI / the command line (e.g. LABEL_FILTERS=autoipam).
+LABEL_FILTERS ?=
 CNI_PATH_CILIUM = "${E2E_DIR}/data/cni/cilium/cilium.yaml" # helm template cilium cilium/cilium --version 1.13.0 -n kube-system --set hubble.enabled=false --set cni.chainingMode=portmap  --set sessionAffinity=true | sed 's/${BIN_PATH}/$BIN_PATH/g'
 
 .PHONY: test-e2e
