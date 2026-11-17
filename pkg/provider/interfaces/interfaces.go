@@ -35,11 +35,13 @@ type Client interface {
 var (
 	// ErrIPTaskPending means a Prism IP reserve or unreserve task did not reach a
 	// terminal status before the wait timed out. Callers retry. Both a reserve and
-	// an unreserve retry must reuse the request id of the attempt they resume.
+	// an unreserve retry must reuse the request id of the attempt they resume, so
+	// that a pending task is resumed rather than a second one started.
 	ErrIPTaskPending = errors.New("prism ip task is pending")
 
 	// ErrIPReservationTerminal means the reserve or unreserve task failed and will
-	// not succeed if the same request id is reused.
+	// not succeed if the same request id is reused. Unreserve callers should
+	// retry with a fresh request id while keeping the same clientContext.
 	ErrIPReservationTerminal = errors.New("prism ip reservation failed")
 )
 

@@ -77,3 +77,12 @@ jobs:
           NUTANIX_PROJECT_SCOPED_PC_PROJECT: ${{ vars.NUTANIX_PROJECT_SCOPED_PC_PROJECT }}
           NUTANIX_PROJECT_SCOPED_USER: ${{ secrets.NUTANIX_PROJECT_SCOPED_USER }}
           NUTANIX_PROJECT_SCOPED_PASSWORD: ${{ secrets.NUTANIX_PROJECT_SCOPED_PASSWORD }}
+
+      - name: Upload e2e artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-${{ inputs.e2e-labels }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: _artifacts
+          if-no-files-found: ignore
+          retention-days: 14

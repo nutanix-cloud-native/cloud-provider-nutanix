@@ -38,8 +38,14 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 	cloudprovider "k8s.io/cloud-provider"
+	cloudproviderapi "k8s.io/cloud-provider/api"
 	servicehelpers "k8s.io/cloud-provider/service/helpers"
 )
+
+func isRetryPending(err error) bool {
+	var re *cloudproviderapi.RetryError
+	return errors.As(err, &re)
+}
 
 func TestAutoIPAMEmptySubnetSkipsReserveAndPool(t *testing.T) {
 	ctx := context.Background()
@@ -84,8 +90,8 @@ func TestAutoIPAMReserveFailureSkipsPool(t *testing.T) {
 		kube, dyn := newClients(svc.DeepCopy())
 		strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
 		_, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil)
-		if !errors.Is(err, interfaces.ErrIPTaskPending) {
-			t.Fatalf("expected pending error, got %v", err)
+		if !isRetryPending(err) {
+			t.Fatalf("expected RetryError for pending reserve, got %v", err)
 		}
 		got := mustGetService(t, kube, "default", "web")
 		if got.Annotations[constants.LoadBalancerReservationIDAnnotation] == "" {
@@ -357,8 +363,8 @@ func TestAutoIPAMTwoServicesAndRestart(t *testing.T) {
 		pendingPrism := &countingPrism{reserveErr: interfaces.ErrIPTaskPending}
 		pendingStrategy := newAutoStrategy(testAutoConfig(), pendingPrism.Prism(), kube, dyn)
 		_, err := pendingStrategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "pending"), nil)
-		if !errors.Is(err, interfaces.ErrIPTaskPending) {
-			t.Fatalf("expected pending error, got %v", err)
+		if !isRetryPending(err) {
+			t.Fatalf("expected RetryError for pending reserve, got %v", err)
 		}
 		if poolExists(t, dyn, "metallb-system", "uid-pending") {
 			t.Fatal("pending reserve created a pool")
@@ -437,8 +443,8 @@ func TestAutoIPAMEnsureDeletedRetryKeepsReservation(t *testing.T) {
 	}
 	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
 	err := strategy.EnsureLoadBalancerDeleted(ctx, "cluster", mustGetService(t, kube, "default", "web"))
-	if !errors.Is(err, interfaces.ErrIPTaskPending) {
-		t.Fatalf("EnsureLoadBalancerDeleted = %v, want pending", err)
+	if !isRetryPending(err) {
+		t.Fatalf("EnsureLoadBalancerDeleted = %v, want RetryError so Service controller requeues delete", err)
 	}
 	if errors.Is(err, cloudprovider.ImplementedElsewhere) {
 		t.Fatal("EnsureLoadBalancerDeleted returned ImplementedElsewhere")
@@ -461,11 +467,44 @@ func TestAutoIPAMEnsureDeletedRetryKeepsReservation(t *testing.T) {
 	}
 
 	err = strategy.EnsureLoadBalancerDeleted(ctx, "cluster", got)
-	if !errors.Is(err, interfaces.ErrIPTaskPending) {
-		t.Fatalf("retry = %v, want pending", err)
+	if !isRetryPending(err) {
+		t.Fatalf("retry = %v, want RetryError so EnsureLoadBalancerDeleted is restarted", err)
 	}
 	if prism.lastUnreserve.requestID != firstID || prism.unreserveCalls != 2 {
 		t.Fatalf("retry request id = %q calls = %d, want %q and 2", prism.lastUnreserve.requestID, prism.unreserveCalls, firstID)
+	}
+}
+
+func TestAutoIPAMEnsureDeletedTerminalUnreserveUsesFreshRequestID(t *testing.T) {
+	ctx := context.Background()
+	prism := &countingPrism{unreserveErrs: []error{interfaces.ErrIPReservationTerminal, nil}}
+	kube, dyn := newClients(reservedService("default", "web", "uid-web"))
+	if err := createPool(t, dyn, newIPAddressPool("metallb-system", "uid-web", "10.4.0.1", "stored-subnet", "res-1")); err != nil {
+		t.Fatal(err)
+	}
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+	if err := strategy.EnsureLoadBalancerDeleted(ctx, "cluster", mustGetService(t, kube, "default", "web")); err != nil {
+		t.Fatalf("EnsureLoadBalancerDeleted: %v", err)
+	}
+	if prism.unreserveCalls != 2 {
+		t.Fatalf("unreserve calls = %d, want 2 (stable id then fresh id)", prism.unreserveCalls)
+	}
+	// Keyed on the reservation, not the Service UID: a UID-keyed id would make
+	// Prism replay an earlier release of a different reservation for the same
+	// Service and report a success that never happened.
+	stableID := unreserveRequestID("res-1")
+	if prism.unreserveRequestIDs[0] != stableID {
+		t.Fatalf("first request id = %q, want the reservation-keyed id %q",
+			prism.unreserveRequestIDs[0], stableID)
+	}
+	if prism.unreserveRequestIDs[0] == unreserveRequestID("uid-web") {
+		t.Fatal("request id is keyed on the Service UID; a later reservation would replay an old release")
+	}
+	if prism.unreserveRequestIDs[1] == "" || prism.unreserveRequestIDs[1] == stableID {
+		t.Fatalf("second request id = %q, want a fresh id", prism.unreserveRequestIDs[1])
+	}
+	if poolExists(t, dyn, "metallb-system", "uid-web") {
+		t.Fatal("pool should be deleted after terminal unreserve recovery")
 	}
 }
 
@@ -605,6 +644,12 @@ type countingPrism struct {
 	lastUnreserve  unreserveCall
 	lastResolve    resolveCall
 	held           map[string][]string
+
+	// unreserveErrs returns one error per unreserve call, in order, so a test
+	// can make the first attempt fail terminally and the retry succeed.
+	unreserveErrs []error
+	// unreserveRequestIDs records the NTNX-Request-Id of every unreserve.
+	unreserveRequestIDs []string
 }
 
 // hold records a reservation that exists before the test starts.
@@ -653,8 +698,15 @@ func (c *countingPrism) Prism() *mock.MockPrism {
 		},
 		UnreserveIPOverride: func(_ context.Context, subnet, requestID, clientContext string) error {
 			c.unreserveCalls++
+			c.unreserveRequestIDs = append(c.unreserveRequestIDs, requestID)
 			c.lastUnreserve = unreserveCall{subnet: subnet, requestID: requestID, clientContext: clientContext}
-			if c.unreserveErr != nil {
+			if len(c.unreserveErrs) > 0 {
+				err := c.unreserveErrs[0]
+				c.unreserveErrs = c.unreserveErrs[1:]
+				if err != nil {
+					return err
+				}
+			} else if c.unreserveErr != nil {
 				return c.unreserveErr
 			}
 			delete(c.held, clientContext)

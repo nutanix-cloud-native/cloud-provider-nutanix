@@ -108,7 +108,11 @@ jobs:
     strategy:
       matrix:
         e2e-labels:
+          # One label per job so each scenario gets a fresh kind bootstrap and
+          # the Makefile's 1h ginkgo timeout budget (do not combine heavy labels).
           - "capx"
+          - "autoipam"
+          - "lb-none"
       fail-fast: false
     needs: check_approvals
     uses: ./.github/workflows/e2e.yaml

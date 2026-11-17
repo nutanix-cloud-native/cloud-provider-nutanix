@@ -18,9 +18,11 @@ package loadbalancer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	metallbv1beta1 "go.universe.tf/metallb/api/v1beta1"
@@ -33,6 +35,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	cloudprovider "k8s.io/cloud-provider"
+	cloudproviderapi "k8s.io/cloud-provider/api"
 	klog "k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 
@@ -41,7 +44,12 @@ import (
 	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/interfaces"
 )
 
-const defaultMetalLBNamespace = "metallb-system"
+const (
+	defaultMetalLBNamespace = "metallb-system"
+	// retryAfterPending is the fixed backoff the Service controller should use
+	// when a Prism IP task is still running.
+	retryAfterPending = 5 * time.Second
+)
 
 var ipAddressPoolGVR = schema.GroupVersionResource{
 	Group:    "metallb.io",
@@ -99,7 +107,7 @@ func (s *AutoIPAMMetalLB) EnsureLoadBalancer(ctx context.Context, _ string, serv
 	}
 	ip, err := s.activate(ctx, service)
 	if err != nil {
-		return nil, err
+		return nil, retryAfterError(err)
 	}
 	return &v1.LoadBalancerStatus{
 		Ingress: []v1.LoadBalancerIngress{{IP: ip}},
@@ -115,21 +123,23 @@ func (*AutoIPAMMetalLB) UpdateLoadBalancer(context.Context, string, *v1.Service,
 // EnsureLoadBalancerDeleted releases the Prism address reserved for the Service
 // and then deletes the MetalLB pool that announced it. It returns nil only
 // after that release has finished, including when the address was already gone.
-// A Prism or pool error is returned so the Service controller keeps the cleanup
-// finalizer and retries. The same request id, derived from the Service UID, is
-// used on every retry. It never returns ImplementedElsewhere and it does not
-// add or remove the finalizer.
+//
+// Any Prism or pool error is returned (never ImplementedElsewhere) so the
+// Service controller keeps service.kubernetes.io/load-balancer-cleanup and
+// requeues EnsureLoadBalancerDeleted. Pending Prism tasks become a RetryError
+// so cleanup is restarted after a fixed delay. This method does not add or
+// remove the finalizer.
 func (s *AutoIPAMMetalLB) EnsureLoadBalancerDeleted(ctx context.Context, _ string, service *v1.Service) error {
 	if service == nil {
 		return nil
 	}
 	if _, _, err := s.clients(); err != nil {
-		return err
+		return retryAfterError(err)
 	}
 
 	live, gone, err := s.serviceForDelete(ctx, service)
 	if err != nil {
-		return err
+		return retryAfterError(err)
 	}
 	if live == nil {
 		return nil
@@ -145,7 +155,7 @@ func (s *AutoIPAMMetalLB) EnsureLoadBalancerDeleted(ctx context.Context, _ strin
 
 	pool, err := s.getPool(ctx, s.metalLBNamespace(), uid)
 	if err != nil {
-		return err
+		return retryAfterError(err)
 	}
 	if pool != nil && pool.Labels[constants.LoadBalancerServiceUIDLabel] == uid {
 		if reservationID == "" {
@@ -178,18 +188,20 @@ func (s *AutoIPAMMetalLB) EnsureLoadBalancerDeleted(ctx context.Context, _ strin
 		}
 		prism, err := s.prism()
 		if err != nil {
-			return err
+			return retryAfterError(err)
 		}
 		// Unreserve releases every address under the context, so a Service that
 		// somehow holds more than one is cleaned up in a single call.
-		if err := prism.UnreserveIP(ctx, subnet, unreserveRequestID(reservationID), reservationContext); err != nil {
-			return fmt.Errorf("unreserve service %s: %w", uid, err)
+		if err := unreserveServiceIP(ctx, prism, subnet, reservationID, reservationContext); err != nil {
+			// Keep annotations so GetLoadBalancer stays exists=true and the
+			// Service controller calls EnsureLoadBalancerDeleted again.
+			return retryAfterError(fmt.Errorf("unreserve service %s: %w", uid, err))
 		}
 	}
 
 	if poolOwnedByService(pool, uid, reservationID, subnet, ip) {
 		if err := s.deletePool(ctx, s.metalLBNamespace(), uid); err != nil {
-			return err
+			return retryAfterError(err)
 		}
 	}
 
@@ -198,10 +210,51 @@ func (s *AutoIPAMMetalLB) EnsureLoadBalancerDeleted(ctx context.Context, _ strin
 			if apierrors.IsNotFound(err) {
 				return nil
 			}
-			return err
+			return retryAfterError(err)
 		}
 	}
 	return nil
+}
+
+// unreserveServiceIP releases every address held under reservationContext.
+//
+// The first attempt uses the request id derived from reservationID, so a retry
+// after a CCM restart resumes that task rather than starting a second one. If
+// Prism reports that id terminally failed, a fresh one is used: Prism keys the
+// unreserve itself by clientContext, so a new request id releases the same
+// addresses, and reusing a burned id would pin cleanup forever.
+func unreserveServiceIP(
+	ctx context.Context,
+	prism interfaces.Prism,
+	subnet, reservationID, reservationContext string,
+) error {
+	err := prism.UnreserveIP(ctx, subnet, unreserveRequestID(reservationID), reservationContext)
+	if err == nil || !errors.Is(err, interfaces.ErrIPReservationTerminal) {
+		return err
+	}
+	return prism.UnreserveIP(ctx, subnet, uuid.NewString(), reservationContext)
+}
+
+// retryAfterError maps pending Prism work to api.RetryError so the Service
+// controller requeues EnsureLoadBalancer / EnsureLoadBalancerDeleted after a
+// fixed delay rather than with exponential backoff. Other errors are returned
+// unchanged. Annotations are left in place by callers so GetLoadBalancer keeps
+// exists=true and delete is invoked again.
+//
+// Note this only takes effect where the controller preserves the error chain.
+// The delete branch of syncLoadBalancerIfNeeded wraps with %v, not %w, so a
+// Service deleted while it still holds the cleanup finalizer falls back to
+// exponential backoff; the ensure path and processLoadBalancerDelete honour it.
+func retryAfterError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, interfaces.ErrIPTaskPending) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled) {
+		return cloudproviderapi.NewRetryError(err.Error(), retryAfterPending)
+	}
+	return err
 }
 
 // unreserveRequestID is stable per reservation so a retry sends the same
@@ -644,16 +697,23 @@ func (s *AutoIPAMMetalLB) updateService(ctx context.Context, namespace, name str
 	if err != nil {
 		return nil, err
 	}
-	current, err := kube.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("get service %s/%s: %w", namespace, name, err)
+	var lastErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		current, err := kube.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("get service %s/%s: %w", namespace, name, err)
+		}
+		mutate(current)
+		updated, err := kube.CoreV1().Services(namespace).Update(ctx, current, metav1.UpdateOptions{})
+		if err == nil {
+			return updated, nil
+		}
+		lastErr = err
+		if !apierrors.IsConflict(err) {
+			return nil, fmt.Errorf("update service %s/%s: %w", namespace, name, err)
+		}
 	}
-	mutate(current)
-	updated, err := kube.CoreV1().Services(namespace).Update(ctx, current, metav1.UpdateOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("update service %s/%s: %w", namespace, name, err)
-	}
-	return updated, nil
+	return nil, fmt.Errorf("update service %s/%s: %w", namespace, name, lastErr)
 }
 
 func serviceUID(live, requested *v1.Service) (string, error) {

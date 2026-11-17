@@ -1,0 +1,9 @@
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: static
+  namespace: metallb-system
+spec:
+  ipAddressPoolSelectors:
+    - matchLabels:
+        pool-type: static
