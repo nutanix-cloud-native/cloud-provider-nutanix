@@ -34,10 +34,20 @@ import (
 // UUID's 16 raw bytes are base64url-encoded to 22 characters instead:
 //
 //	nkp:<b64u(clusterUID)>:<b64u(serviceUID)>  49 chars  this strategy
-//	nkp:<b64u(clusterUID)>:cp                  29 chars  the API server VIP
 //
 // The shared prefix nkp:<b64u(clusterUID)>: is what lets a cluster teardown
-// release every address this cluster holds without the workload cluster.
+// release every Service address this cluster holds without the workload
+// cluster.
+//
+// It does NOT cover the API server address. That one is reserved by the Nutanix
+// IPAM provider, which writes the IPAddressClaim's UID verbatim as the context
+// and offers no way to override it, so it carries no nkp: prefix and has to be
+// swept by exact context instead. Measured on PC 7.6 GA; assuming otherwise is
+// what once leaked the API server address on every cluster delete.
+//
+// CAREN's cluster teardown recomputes this prefix with the same encoding
+// (pkg/handlers/lifecycle/servicelbgc/reservation.go). The two implementations
+// have to agree, so neither may change the grammar alone.
 const (
 	clientContextDomain = "nkp"
 	clientContextSep    = ":"
@@ -60,8 +70,8 @@ func serviceClientContext(clusterUID, serviceUID string) (string, error) {
 	return context, nil
 }
 
-// clusterContextPrefix returns the prefix shared by every reservation this
-// cluster holds, including the API server VIP reserved by the IPAM provider.
+// clusterContextPrefix returns the prefix shared by every Service reservation
+// this cluster holds. The API server address does not carry it; see above.
 func clusterContextPrefix(clusterUID string) string {
 	return clientContextDomain + clientContextSep + encodeUID(clusterUID) + clientContextSep
 }
