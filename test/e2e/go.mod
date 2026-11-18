@@ -5,11 +5,16 @@ go 1.26.0
 toolchain go1.26.5
 
 require (
+	github.com/google/uuid v1.6.0
 	github.com/nutanix-cloud-native/prism-go-client v0.8.2
+	github.com/nutanix/ntnx-api-golang-clients/networking-go-client/v4 v4.4.1
+	github.com/nutanix/ntnx-api-golang-clients/prism-go-client/v4 v4.4.1
 	github.com/onsi/ginkgo/v2 v2.32.0
 	github.com/onsi/gomega v1.42.1
 	k8s.io/api v0.37.1
 	k8s.io/apimachinery v0.37.1
+	k8s.io/client-go v0.37.1
+	k8s.io/utils v0.0.0-20260626114624-be93311217bd
 	sigs.k8s.io/cluster-api/api v1.14.3
 	sigs.k8s.io/cluster-api/test v1.14.3
 	sigs.k8s.io/controller-runtime v0.25.2
@@ -85,7 +90,6 @@ require (
 	github.com/google/go-github/v82 v82.0.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/google/pprof v0.0.0-20260402051712-545e8a4df936 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
@@ -110,8 +114,6 @@ require (
 	github.com/nutanix/ntnx-api-golang-clients/iam-go-client/v4 v4.1.2-beta.3 // indirect
 	github.com/nutanix/ntnx-api-golang-clients/monitoring-go-client/v4 v4.3.1 // indirect
 	github.com/nutanix/ntnx-api-golang-clients/multidomain-go-client/v4 v4.4.1-beta.1 // indirect
-	github.com/nutanix/ntnx-api-golang-clients/networking-go-client/v4 v4.4.1 // indirect
-	github.com/nutanix/ntnx-api-golang-clients/prism-go-client/v4 v4.4.1 // indirect
 	github.com/nutanix/ntnx-api-golang-clients/vmm-go-client/v4 v4.3.1 // indirect
 	github.com/nutanix/ntnx-api-golang-clients/volumes-go-client/v4 v4.3.1 // indirect
 	github.com/olekukonko/cat v0.0.0-20250911104152-50322a0618f6 // indirect
@@ -173,13 +175,11 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	k8s.io/apiextensions-apiserver v0.37.1 // indirect
 	k8s.io/apiserver v0.37.1 // indirect
-	k8s.io/client-go v0.37.1 // indirect
 	k8s.io/cluster-bootstrap v0.37.1 // indirect
 	k8s.io/component-base v0.37.1 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad // indirect
 	k8s.io/streaming v0.37.1 // indirect
-	k8s.io/utils v0.0.0-20260626114624-be93311217bd // indirect
 	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.36.0 // indirect
 	sigs.k8s.io/cluster-api v1.14.3 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect

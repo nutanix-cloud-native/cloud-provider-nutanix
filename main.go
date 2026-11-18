@@ -46,7 +46,10 @@ func main() {
 	fss := cliflag.NamedFlagSets{}
 
 	controllerInitializers := app.DefaultInitFuncConstructors
-	delete(controllerInitializers, "service")
+	// The "service" (Service LoadBalancer) controller is registered so that the
+	// CCM LoadBalancer strategies run. Operators can still disable it at runtime
+	// via --controllers=*,-service (the chart exposes a toggle for this). The
+	// "route" controller remains unused by this provider.
 	delete(controllerInitializers, "route")
 
 	command := app.NewCloudControllerManagerCommand(ccmOptions,

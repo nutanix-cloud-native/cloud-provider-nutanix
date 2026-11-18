@@ -4,14 +4,17 @@ package e2e
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	batchv1 "k8s.io/api/batch/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -111,11 +114,38 @@ var _ = SynchronizedAfterSuite(func() {
 	}
 })
 
+// QuickStart specs share one CONTROL_PLANE_ENDPOINT_IP. Wait until the previous
+// workload cluster has released kube-vip before the next spec reuses it.
+var _ = BeforeEach(func() {
+	waitForControlPlaneVIPFree()
+})
+
+func waitForControlPlaneVIPFree() {
+	ip := strings.TrimSpace(os.Getenv("CONTROL_PLANE_ENDPOINT_IP"))
+	if ip == "" && e2eConfig != nil {
+		ip = strings.TrimSpace(e2eConfig.GetVariableOrEmpty("CONTROL_PLANE_ENDPOINT_IP"))
+	}
+	if ip == "" {
+		return
+	}
+	endpoint := net.JoinHostPort(ip, "6443")
+	Byf("Waiting for control-plane VIP %s to be free", endpoint)
+	Eventually(func() bool {
+		conn, err := net.DialTimeout("tcp", endpoint, 2*time.Second)
+		if err != nil {
+			return true
+		}
+		_ = conn.Close()
+		return false
+	}, 10*time.Minute, 5*time.Second).Should(BeTrue(), "control-plane VIP %s is still accepting connections", endpoint)
+}
+
 func initScheme() *runtime.Scheme {
 	sc := runtime.NewScheme()
 	framework.TryAddDefaultSchemes(sc)
-	err := storagev1.AddToScheme(sc)
-	Expect(err).NotTo(HaveOccurred())
+	Expect(storagev1.AddToScheme(sc)).To(Succeed())
+	// batch/v1 is required for LoadBalancer connectivity Jobs; CAPI defaults omit it.
+	Expect(batchv1.AddToScheme(sc)).To(Succeed())
 	return sc
 }
 
@@ -124,8 +154,33 @@ func loadE2EConfig(configPath string) *clusterctl.E2EConfig {
 	Expect(config).ToNot(BeNil(), "Failed to load E2E config from %s", configPath)
 
 	resolveRelativeComponentSources(config, filepath.Dir(configPath))
+	resolveSubnetExtIDIntoConfig(config)
 
 	return config
+}
+
+// resolveSubnetExtIDIntoConfig fills NUTANIX_SUBNET_EXTID from NUTANIX_SUBNET_NAME when
+// the extID is unset. CAPX templates reference the extID for AutoIPAMMetalLB; calculating
+// it here keeps profiles name-only and avoids clusterctl missing-variable failures.
+func resolveSubnetExtIDIntoConfig(config *clusterctl.E2EConfig) {
+	if config == nil {
+		return
+	}
+	if strings.TrimSpace(config.GetVariableOrEmpty("NUTANIX_SUBNET_EXTID")) != "" {
+		return
+	}
+	subnetName := strings.TrimSpace(config.GetVariableOrEmpty("NUTANIX_SUBNET_NAME"))
+	if subnetName == "" {
+		return
+	}
+	extID, err := resolveSubnetExtID(ctx, subnetName)
+	Expect(err).NotTo(HaveOccurred(), "resolve NUTANIX_SUBNET_EXTID from NUTANIX_SUBNET_NAME=%q", subnetName)
+	if config.Variables == nil {
+		config.Variables = map[string]string{}
+	}
+	config.Variables["NUTANIX_SUBNET_EXTID"] = extID
+	Expect(os.Setenv("NUTANIX_SUBNET_EXTID", extID)).To(Succeed())
+	Byf("Resolved NUTANIX_SUBNET_EXTID=%s from NUTANIX_SUBNET_NAME=%s", extID, subnetName)
 }
 
 func resolveRelativeComponentSources(config *clusterctl.E2EConfig, configDirectory string) {
@@ -150,6 +205,12 @@ func resolveRelativeComponentSources(config *clusterctl.E2EConfig, configDirecto
 }
 
 func createClusterctlLocalRepository(config *clusterctl.E2EConfig, repositoryFolder string) string {
+	// CreateRepository only writes the versions listed in the e2e config; it does
+	// not remove older version folders left from previous runs. clusterctl's
+	// "latest" resolution prefers release tags over pre-releases, so a stale
+	// v1.7.2 would beat v1.11.0-dev.1 and miss flavored cluster templates.
+	Expect(os.RemoveAll(repositoryFolder)).To(Succeed(), "Failed to clean clusterctl local repository %s", repositoryFolder)
+
 	createRepositoryInput := clusterctl.CreateRepositoryInput{
 		E2EConfig:        config,
 		RepositoryFolder: repositoryFolder,

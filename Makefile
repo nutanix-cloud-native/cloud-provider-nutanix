@@ -76,6 +76,18 @@ ifeq ($(EXPORT_RESULT), true)
 endif
 
 ## --------------------------------------
+## Integration tests (envtest + real Prism Central)
+## --------------------------------------
+
+ENVTEST_K8S_VERSION ?= 1.36
+ENVTEST ?= go run sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.22
+
+.PHONY: test-integration
+test-integration: ## Run AutoIPAM PC integration tests (requires NUTANIX_* env and subnet extID)
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
+		go test -tags=integration -count=1 -timeout=30m -v ./test/integration/...
+
+## --------------------------------------
 ## E2E tests
 ## --------------------------------------
 
@@ -84,7 +96,8 @@ GINKGO_NODES  ?= 1
 E2E_DIR ?= ${REPO_ROOT}/test/e2e
 E2E_CONF_FILE  ?= ${E2E_DIR}/config/nutanix.yaml
 GINKGO_NOCOLOR ?= false
-LABEL_FILTERS = ""
+# Overridable from CI / the command line (e.g. LABEL_FILTERS=autoipam).
+LABEL_FILTERS ?=
 CNI_PATH_CILIUM = "${E2E_DIR}/data/cni/cilium/cilium.yaml" # helm template cilium cilium/cilium --version 1.13.0 -n kube-system --set hubble.enabled=false --set cni.chainingMode=portmap  --set sessionAffinity=true | sed 's/${BIN_PATH}/$BIN_PATH/g'
 
 .PHONY: test-e2e

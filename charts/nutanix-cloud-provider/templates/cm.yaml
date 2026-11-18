@@ -24,6 +24,15 @@ data:
 
       },
       "enableCustomLabeling": {{ .Values.enableCustomLabeling }},
+      "loadBalancer": {
+        "defaultStrategy": {{ .Values.loadBalancer.defaultStrategy | default "None" | toJson }},
+        "autoIPAMMetalLB": {
+          "subnet": {{ dig "autoIPAMMetalLB" "subnet" "" .Values.loadBalancer | toJson }},
+          "cluster": {{ dig "autoIPAMMetalLB" "cluster" "" .Values.loadBalancer | toJson }},
+          "clusterUID": {{ dig "autoIPAMMetalLB" "clusterUID" "" .Values.loadBalancer | toJson }},
+          "metalLBNamespace": {{ dig "autoIPAMMetalLB" "metalLBNamespace" "metallb-system" .Values.loadBalancer | toJson }}
+        }
+      },
 {{- with .Values.ignoredNodeIPs }}
       "ignoredNodeIPs": [ {{ range $idx, $ip := . }}{{ if $idx }}, {{ end }}{{ $ip | toJson }}{{ end }} ],
 {{- end }}

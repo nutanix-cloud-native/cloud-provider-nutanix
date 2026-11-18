@@ -1,0 +1,1202 @@
+/*
+Copyright 2026 Nutanix, Inc
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package loadbalancer
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/testing/mock"
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/interfaces"
+	metallbv1beta1 "go.universe.tf/metallb/api/v1beta1"
+	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/fake"
+	clienttesting "k8s.io/client-go/testing"
+	cloudprovider "k8s.io/cloud-provider"
+	cloudproviderapi "k8s.io/cloud-provider/api"
+	servicehelpers "k8s.io/cloud-provider/service/helpers"
+)
+
+func isRetryPending(err error) bool {
+	var re *cloudproviderapi.RetryError
+	return errors.As(err, &re)
+}
+
+func TestAutoIPAMEmptySubnetSkipsReserveAndPool(t *testing.T) {
+	ctx := context.Background()
+	prism := &countingPrism{}
+	kube, dyn := newClients(lbService("default", "web", "uid-web"))
+	strategy := newAutoStrategy(config.AutoIPAMMetalLB{}, prism.Prism(), kube, dyn)
+
+	_, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil)
+	if err == nil || !strings.Contains(err.Error(), "loadBalancer.autoIPAMMetalLB.subnet is empty") {
+		t.Fatalf("error = %v, want the empty-subnet message", err)
+	}
+	// The check belongs before subnet resolution, so an unset subnet is a config
+	// error rather than a Prism round trip that fails as "no subnet named".
+	if prism.resolveCalls != 0 || prism.reserveCalls != 0 {
+		t.Fatalf("prism was called: resolve=%d reserve=%d", prism.resolveCalls, prism.reserveCalls)
+	}
+	if poolExists(t, dyn, defaultMetalLBNamespace, "uid-web") {
+		t.Fatal("empty subnet created a pool")
+	}
+}
+
+func TestAutoIPAMReserveFailureSkipsPool(t *testing.T) {
+	ctx := context.Background()
+	svc := lbService("default", "web", "uid-web")
+
+	t.Run("prism error", func(t *testing.T) {
+		prism := &countingPrism{reserveErr: errors.New("prism unavailable")}
+		kube, dyn := newClients(svc.DeepCopy())
+		strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+		if _, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil); err == nil {
+			t.Fatal("expected reserve error, got nil")
+		}
+		got := mustGetService(t, kube, "default", "web")
+		if got.Annotations[constants.LoadBalancerReservationIDAnnotation] == "" {
+			t.Fatal("retryable prism error cleared the reservation id")
+		}
+		assertNoPoolOrMetalLB(t, kube, dyn, got)
+	})
+
+	t.Run("pending", func(t *testing.T) {
+		prism := &countingPrism{reserveErr: interfaces.ErrIPTaskPending}
+		kube, dyn := newClients(svc.DeepCopy())
+		strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+		_, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil)
+		if !isRetryPending(err) {
+			t.Fatalf("expected RetryError for pending reserve, got %v", err)
+		}
+		got := mustGetService(t, kube, "default", "web")
+		if got.Annotations[constants.LoadBalancerReservationIDAnnotation] == "" {
+			t.Fatal("pending reserve cleared the reservation id")
+		}
+		assertNoPoolOrMetalLB(t, kube, dyn, got)
+	})
+
+	t.Run("terminal", func(t *testing.T) {
+		prism := &countingPrism{reserveErr: interfaces.ErrIPReservationTerminal}
+		kube, dyn := newClients(svc.DeepCopy())
+		strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+		_, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil)
+		if !errors.Is(err, interfaces.ErrIPReservationTerminal) {
+			t.Fatalf("expected terminal error, got %v", err)
+		}
+		got := mustGetService(t, kube, "default", "web")
+		if got.Annotations[constants.LoadBalancerReservationIDAnnotation] == "" {
+			t.Fatal("terminal reserve failure cleared the reservation id")
+		}
+		assertNoPoolOrMetalLB(t, kube, dyn, got)
+	})
+}
+
+func TestAutoIPAMActivationDoesNotAddCleanupFinalizer(t *testing.T) {
+	ctx := context.Background()
+	prism := &countingPrism{ip: "10.0.0.8"}
+	kube, dyn := newClients(lbService("default", "web", "uid-web"))
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+	if _, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := mustGetService(t, kube, "default", "web")
+	for _, f := range got.Finalizers {
+		if f == servicehelpers.LoadBalancerCleanupFinalizer {
+			t.Fatal("activation added the cleanup finalizer")
+		}
+	}
+}
+
+func TestAutoIPAMReservationOrderAndPoolSpec(t *testing.T) {
+	ctx := context.Background()
+	kube, dyn := newClients(lbService("default", "web", "uid-web"))
+	prism := &countingPrism{ip: "10.2.0.5"}
+	prism.onReserve = func() {
+		got := mustGetService(t, kube, "default", "web")
+		if got.Annotations[constants.LoadBalancerReservationIDAnnotation] == "" {
+			t.Fatal("reservation id was not written before ReserveIP")
+		}
+		if got.Annotations[constants.MetalLBRequestedIPsAnnotation] != "" {
+			t.Fatal("MetalLB annotation was written before ReserveIP")
+		}
+		if poolExists(t, dyn, "metallb-system", "uid-web") {
+			t.Fatal("pool existed before ReserveIP")
+		}
+	}
+	strategy := newAutoStrategy(config.AutoIPAMMetalLB{Subnet: "subnet-ext", ClusterUID: testClusterUID}, prism.Prism(), kube, dyn)
+	status, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status == nil || len(status.Ingress) != 1 || status.Ingress[0].IP != "10.2.0.5" {
+		t.Fatalf("status = %#v, want IP 10.2.0.5", status)
+	}
+
+	got := mustGetService(t, kube, "default", "web")
+	if got.Annotations[constants.MetalLBRequestedIPsAnnotation] != "10.2.0.5" {
+		t.Fatalf("MetalLB annotation = %q", got.Annotations[constants.MetalLBRequestedIPsAnnotation])
+	}
+	if got.Annotations[constants.LoadBalancerIPAnnotation] != "10.2.0.5" {
+		t.Fatalf("IP annotation = %q", got.Annotations[constants.LoadBalancerIPAnnotation])
+	}
+	if got.Annotations[constants.LoadBalancerSubnetAnnotation] != "subnet-ext" {
+		t.Fatalf("subnet annotation = %q", got.Annotations[constants.LoadBalancerSubnetAnnotation])
+	}
+	pool := mustGetPool(t, dyn, defaultMetalLBNamespace, "uid-web")
+	assertPool(t, pool, "uid-web", got.Annotations[constants.LoadBalancerReservationIDAnnotation], "subnet-ext", "10.2.0.5")
+}
+
+func TestAutoIPAMMetalLBAnnotationAfterPool(t *testing.T) {
+	ctx := context.Background()
+	prism := &countingPrism{ip: "10.2.0.6"}
+	kube, dyn := newClients(lbService("default", "web", "uid-web"))
+	dyn.PrependReactor("create", "ipaddresspools", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("pool create failed")
+	})
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+	if _, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil); err == nil {
+		t.Fatal("expected pool create error, got nil")
+	}
+	got := mustGetService(t, kube, "default", "web")
+	if got.Annotations[constants.LoadBalancerIPAnnotation] != "10.2.0.6" {
+		t.Fatalf("IP annotation = %q, want the reserved address persisted before the pool", got.Annotations[constants.LoadBalancerIPAnnotation])
+	}
+	if got.Annotations[constants.MetalLBRequestedIPsAnnotation] != "" {
+		t.Fatal("MetalLB annotation was written although the pool was not created")
+	}
+}
+
+func TestAutoIPAMSecondEnsureDoesNotReserveAgain(t *testing.T) {
+	ctx := context.Background()
+	prism := &countingPrism{ip: "10.2.0.7"}
+	kube, dyn := newClients(lbService("default", "web", "uid-web"))
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+	if _, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil); err != nil {
+		t.Fatalf("first ensure: %v", err)
+	}
+	if _, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil); err != nil {
+		t.Fatalf("second ensure: %v", err)
+	}
+	if prism.reserveCalls != 1 {
+		t.Fatalf("ReserveIP calls = %d, want 1", prism.reserveCalls)
+	}
+}
+
+func TestAutoIPAMForeignPoolLeftUnchanged(t *testing.T) {
+	ctx := context.Background()
+	prism := &countingPrism{ip: "10.2.0.8"}
+	kube, dyn := newClients(lbService("default", "web", "uid-web"))
+	foreign := newIPAddressPool("metallb-system", "uid-web", "10.9.9.9", "other-subnet", "other-reservation")
+	foreign.Labels[constants.LoadBalancerServiceUIDLabel] = "someone-else"
+	delete(foreign.Labels, constants.LoadBalancerIPLabel)
+	foreignObj, err := unstructuredFromPool(foreign)
+	if err != nil {
+		t.Fatalf("encode foreign pool: %v", err)
+	}
+	if _, err := dyn.Resource(ipAddressPoolGVR).Namespace("metallb-system").Create(ctx, foreignObj, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create foreign pool: %v", err)
+	}
+	before := foreign.DeepCopy()
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+	if _, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil); err == nil {
+		t.Fatal("expected identity mismatch error, got nil")
+	}
+	got := mustGetPool(t, dyn, "metallb-system", "uid-web")
+	if got.Labels[constants.LoadBalancerServiceUIDLabel] != before.Labels[constants.LoadBalancerServiceUIDLabel] {
+		t.Fatalf("foreign pool labels changed: %#v", got.Labels)
+	}
+	if got.Labels[constants.LoadBalancerIPLabel] != "" {
+		t.Fatal("foreign pool identity was overwritten")
+	}
+	svc := mustGetService(t, kube, "default", "web")
+	if svc.Annotations[constants.MetalLBRequestedIPsAnnotation] != "" {
+		t.Fatal("MetalLB annotation set despite pool identity mismatch")
+	}
+}
+
+func TestAutoIPAMUpdateLoadBalancerImplementedElsewhere(t *testing.T) {
+	ctx := context.Background()
+	prism := &countingPrism{ip: "10.2.0.9"}
+	kube, dyn := newClients(lbService("default", "web", "uid-web"))
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+	status, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil)
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	err = strategy.UpdateLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil)
+	if !errors.Is(err, cloudprovider.ImplementedElsewhere) {
+		t.Fatalf("UpdateLoadBalancer = %v, want ImplementedElsewhere", err)
+	}
+	if prism.reserveCalls != 1 {
+		t.Fatalf("ReserveIP calls = %d, want 1", prism.reserveCalls)
+	}
+	got := mustGetService(t, kube, "default", "web")
+	if got.Annotations[constants.LoadBalancerIPAnnotation] != status.Ingress[0].IP {
+		t.Fatalf("IP annotation = %q, want %q", got.Annotations[constants.LoadBalancerIPAnnotation], status.Ingress[0].IP)
+	}
+	if !poolExists(t, dyn, "metallb-system", "uid-web") {
+		t.Fatal("update removed the pool")
+	}
+}
+
+func TestAutoIPAMGetLoadBalancer(t *testing.T) {
+	ctx := context.Background()
+	prism := &countingPrism{ip: "10.2.0.10"}
+	kube, dyn := newClients(lbService("default", "web", "uid-web"))
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+	before := mustGetService(t, kube, "default", "web")
+	status, exists, err := strategy.GetLoadBalancer(ctx, "cluster", before)
+	if err != nil || exists || status != nil {
+		t.Fatalf("before activation GetLoadBalancer = (%v, %v, %v), want (nil, false, nil)", status, exists, err)
+	}
+	if _, err := strategy.EnsureLoadBalancer(ctx, "cluster", before, nil); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	after := mustGetService(t, kube, "default", "web")
+	status, exists, err = strategy.GetLoadBalancer(ctx, "cluster", after)
+	if err != nil || !exists || status == nil || status.Ingress[0].IP != "10.2.0.10" {
+		t.Fatalf("after activation GetLoadBalancer = (%v, %v, %v)", status, exists, err)
+	}
+
+	pending := lbService("default", "pending-get", "uid-pending-get")
+	pending.Annotations = map[string]string{constants.LoadBalancerReservationIDAnnotation: "res-pending"}
+	status, exists, err = strategy.GetLoadBalancer(ctx, "cluster", pending)
+	if err != nil || !exists || status == nil {
+		t.Fatalf("reservation id only GetLoadBalancer = (%v, %v, %v), want exists", status, exists, err)
+	}
+	if len(status.Ingress) != 0 {
+		t.Fatalf("reservation id only ingress = %#v, want empty", status.Ingress)
+	}
+}
+
+func TestAutoIPAMTwoServicesAndRestart(t *testing.T) {
+	ctx := context.Background()
+	web := lbService("default", "web", "uid-web")
+	api := lbService("default", "api", "uid-api")
+	web.Finalizers = []string{servicehelpers.LoadBalancerCleanupFinalizer}
+	api.Finalizers = []string{servicehelpers.LoadBalancerCleanupFinalizer}
+	kube, dyn := newClients(web, api)
+
+	ips := []string{"10.8.0.1", "10.8.0.2"}
+	var reserveCalls int
+	held := map[string][]string{}
+	prism := &mock.MockPrism{
+		ReserveIPOverride: func(_ context.Context, _, _, clientContext string) (string, error) {
+			if reserveCalls >= len(ips) {
+				t.Fatalf("unexpected ReserveIP call %d", reserveCalls+1)
+			}
+			ip := ips[reserveCalls]
+			reserveCalls++
+			held[clientContext] = append(held[clientContext], ip)
+			return ip, nil
+		},
+		ReservedIPsOverride: func(_ context.Context, _, clientContext string) ([]string, error) {
+			return held[clientContext], nil
+		},
+	}
+
+	newStrategy := func() *AutoIPAMMetalLB {
+		return newAutoStrategy(testAutoConfig(), prism, kube, dyn)
+	}
+
+	first := newStrategy()
+	webStatus, err := first.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil)
+	if err != nil {
+		t.Fatalf("ensure web: %v", err)
+	}
+	apiStatus, err := first.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "api"), nil)
+	if err != nil {
+		t.Fatalf("ensure api: %v", err)
+	}
+	if webStatus.Ingress[0].IP == apiStatus.Ingress[0].IP {
+		t.Fatalf("services reserved the same IP %s", webStatus.Ingress[0].IP)
+	}
+
+	restarted := newStrategy()
+	if _, err := restarted.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil); err != nil {
+		t.Fatalf("ensure web after restart: %v", err)
+	}
+	if _, err := restarted.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "api"), nil); err != nil {
+		t.Fatalf("ensure api after restart: %v", err)
+	}
+	if reserveCalls != 2 {
+		t.Fatalf("ReserveIP calls = %d, want 2", reserveCalls)
+	}
+
+	webGot := mustGetService(t, kube, "default", "web")
+	apiGot := mustGetService(t, kube, "default", "api")
+	if webGot.Annotations[constants.LoadBalancerIPAnnotation] != "10.8.0.1" || apiGot.Annotations[constants.LoadBalancerIPAnnotation] != "10.8.0.2" {
+		t.Fatalf("persisted IPs web=%q api=%q", webGot.Annotations[constants.LoadBalancerIPAnnotation], apiGot.Annotations[constants.LoadBalancerIPAnnotation])
+	}
+	assertPool(t, mustGetPool(t, dyn, "metallb-system", "uid-web"), "uid-web", webGot.Annotations[constants.LoadBalancerReservationIDAnnotation], "subnet-ext", "10.8.0.1")
+	assertPool(t, mustGetPool(t, dyn, "metallb-system", "uid-api"), "uid-api", apiGot.Annotations[constants.LoadBalancerReservationIDAnnotation], "subnet-ext", "10.8.0.2")
+
+	t.Run("pending reserve creates no pool", func(t *testing.T) {
+		if _, err := kube.CoreV1().Services("default").Create(ctx, lbService("default", "pending", "uid-pending"), metav1.CreateOptions{}); err != nil {
+			t.Fatalf("create pending service: %v", err)
+		}
+		pendingPrism := &countingPrism{reserveErr: interfaces.ErrIPTaskPending}
+		pendingStrategy := newAutoStrategy(testAutoConfig(), pendingPrism.Prism(), kube, dyn)
+		_, err := pendingStrategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "pending"), nil)
+		if !isRetryPending(err) {
+			t.Fatalf("expected RetryError for pending reserve, got %v", err)
+		}
+		if poolExists(t, dyn, "metallb-system", "uid-pending") {
+			t.Fatal("pending reserve created a pool")
+		}
+		if !poolExists(t, dyn, "metallb-system", "uid-api") {
+			t.Fatal("pending reserve removed the other service pool")
+		}
+	})
+}
+
+func TestAutoIPAMEnsureDeletedReleasesReservation(t *testing.T) {
+	ctx := context.Background()
+	web := reservedService("default", "web", "uid-web")
+	api := reservedService("default", "api", "uid-api")
+	api.Annotations[constants.LoadBalancerIPAnnotation] = "10.4.0.2"
+	api.Annotations[constants.MetalLBRequestedIPsAnnotation] = "10.4.0.2"
+	kube, dyn := newClients(web, api)
+	if err := createPool(t, dyn, newIPAddressPool("metallb-system", "uid-web", "10.4.0.1", "stored-subnet", "res-1")); err != nil {
+		t.Fatal(err)
+	}
+	if err := createPool(t, dyn, newIPAddressPool("metallb-system", "uid-api", "10.4.0.2", "stored-subnet", "res-1")); err != nil {
+		t.Fatal(err)
+	}
+	prism := &countingPrism{}
+	strategy := newAutoStrategy(config.AutoIPAMMetalLB{Subnet: "config-subnet", ClusterUID: testClusterUID}, prism.Prism(), kube, dyn)
+
+	if err := strategy.EnsureLoadBalancerDeleted(ctx, "cluster", mustGetService(t, kube, "default", "web")); err != nil {
+		t.Fatalf("EnsureLoadBalancerDeleted: %v", err)
+	}
+	if prism.reserveCalls != 0 || prism.unreserveCalls != 1 {
+		t.Fatalf("reserve=%d unreserve=%d, want 0 and 1", prism.reserveCalls, prism.unreserveCalls)
+	}
+	if prism.lastUnreserve.subnet != "stored-subnet" || prism.lastUnreserve.clientContext != testContext(t, "uid-web") {
+		t.Fatalf("unreserve = %+v, want stored-subnet and the derived context", prism.lastUnreserve)
+	}
+	// Keyed on the reservation id, not the Service UID: see unreserveRequestID.
+	if prism.lastUnreserve.requestID != unreserveRequestID("res-1") {
+		t.Fatalf("request id = %q, want %q", prism.lastUnreserve.requestID, unreserveRequestID("res-1"))
+	}
+	got := mustGetService(t, kube, "default", "web")
+	if hasReservationAnnotations(got) {
+		t.Fatalf("annotations still set: %#v", got.Annotations)
+	}
+	if !hasFinalizer(got, servicehelpers.LoadBalancerCleanupFinalizer) {
+		t.Fatal("EnsureLoadBalancerDeleted removed the cleanup finalizer")
+	}
+	if poolExists(t, dyn, "metallb-system", "uid-web") {
+		t.Fatal("owned pool was not deleted")
+	}
+	if !poolExists(t, dyn, "metallb-system", "uid-api") {
+		t.Fatal("sibling pool was deleted")
+	}
+	apiGot := mustGetService(t, kube, "default", "api")
+	if apiGot.Annotations[constants.LoadBalancerIPAnnotation] != "10.4.0.2" {
+		t.Fatal("sibling reservation was cleared")
+	}
+	status, exists, err := strategy.GetLoadBalancer(ctx, "cluster", got)
+	if err != nil || exists || status != nil {
+		t.Fatalf("after release GetLoadBalancer = (%v, %v, %v), want absent", status, exists, err)
+	}
+
+	if err := strategy.EnsureLoadBalancerDeleted(ctx, "cluster", got); err != nil {
+		t.Fatalf("second delete: %v", err)
+	}
+	if prism.unreserveCalls != 1 {
+		t.Fatalf("second delete unreserve calls = %d, want 1", prism.unreserveCalls)
+	}
+}
+
+func TestAutoIPAMEnsureDeletedRetryKeepsReservation(t *testing.T) {
+	ctx := context.Background()
+	prism := &countingPrism{unreserveErr: interfaces.ErrIPTaskPending}
+	kube, dyn := newClients(reservedService("default", "web", "uid-web"))
+	if err := createPool(t, dyn, newIPAddressPool("metallb-system", "uid-web", "10.4.0.1", "stored-subnet", "res-1")); err != nil {
+		t.Fatal(err)
+	}
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+	err := strategy.EnsureLoadBalancerDeleted(ctx, "cluster", mustGetService(t, kube, "default", "web"))
+	if !isRetryPending(err) {
+		t.Fatalf("EnsureLoadBalancerDeleted = %v, want RetryError so Service controller requeues delete", err)
+	}
+	if errors.Is(err, cloudprovider.ImplementedElsewhere) {
+		t.Fatal("EnsureLoadBalancerDeleted returned ImplementedElsewhere")
+	}
+	firstID := prism.lastUnreserve.requestID
+	got := mustGetService(t, kube, "default", "web")
+	if got.Annotations[constants.LoadBalancerIPAnnotation] != "10.4.0.1" ||
+		got.Annotations[constants.LoadBalancerReservationIDAnnotation] != "res-1" {
+		t.Fatalf("failed unreserve cleared annotations: %#v", got.Annotations)
+	}
+	if !hasFinalizer(got, servicehelpers.LoadBalancerCleanupFinalizer) {
+		t.Fatal("failed unreserve removed the cleanup finalizer")
+	}
+	if !poolExists(t, dyn, "metallb-system", "uid-web") {
+		t.Fatal("failed unreserve deleted the pool")
+	}
+	status, exists, getErr := strategy.GetLoadBalancer(ctx, "cluster", got)
+	if getErr != nil || !exists || status == nil || status.Ingress[0].IP != "10.4.0.1" {
+		t.Fatalf("after failed unreserve GetLoadBalancer = (%v, %v, %v)", status, exists, getErr)
+	}
+
+	err = strategy.EnsureLoadBalancerDeleted(ctx, "cluster", got)
+	if !isRetryPending(err) {
+		t.Fatalf("retry = %v, want RetryError so EnsureLoadBalancerDeleted is restarted", err)
+	}
+	if prism.lastUnreserve.requestID != firstID || prism.unreserveCalls != 2 {
+		t.Fatalf("retry request id = %q calls = %d, want %q and 2", prism.lastUnreserve.requestID, prism.unreserveCalls, firstID)
+	}
+}
+
+func TestAutoIPAMEnsureDeletedTerminalUnreserveUsesFreshRequestID(t *testing.T) {
+	ctx := context.Background()
+	prism := &countingPrism{unreserveErrs: []error{interfaces.ErrIPReservationTerminal, nil}}
+	kube, dyn := newClients(reservedService("default", "web", "uid-web"))
+	if err := createPool(t, dyn, newIPAddressPool("metallb-system", "uid-web", "10.4.0.1", "stored-subnet", "res-1")); err != nil {
+		t.Fatal(err)
+	}
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+	if err := strategy.EnsureLoadBalancerDeleted(ctx, "cluster", mustGetService(t, kube, "default", "web")); err != nil {
+		t.Fatalf("EnsureLoadBalancerDeleted: %v", err)
+	}
+	if prism.unreserveCalls != 2 {
+		t.Fatalf("unreserve calls = %d, want 2 (stable id then fresh id)", prism.unreserveCalls)
+	}
+	// Keyed on the reservation, not the Service UID: a UID-keyed id would make
+	// Prism replay an earlier release of a different reservation for the same
+	// Service and report a success that never happened.
+	stableID := unreserveRequestID("res-1")
+	if prism.unreserveRequestIDs[0] != stableID {
+		t.Fatalf("first request id = %q, want the reservation-keyed id %q",
+			prism.unreserveRequestIDs[0], stableID)
+	}
+	if prism.unreserveRequestIDs[0] == unreserveRequestID("uid-web") {
+		t.Fatal("request id is keyed on the Service UID; a later reservation would replay an old release")
+	}
+	if prism.unreserveRequestIDs[1] == "" || prism.unreserveRequestIDs[1] == stableID {
+		t.Fatalf("second request id = %q, want a fresh id", prism.unreserveRequestIDs[1])
+	}
+	if poolExists(t, dyn, "metallb-system", "uid-web") {
+		t.Fatal("pool should be deleted after terminal unreserve recovery")
+	}
+}
+
+func TestAutoIPAMEnsureDeletedWithoutReservation(t *testing.T) {
+	ctx := context.Background()
+	prism := &countingPrism{}
+	kube, dyn := newClients(lbService("default", "web", "uid-web"))
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+	if err := strategy.EnsureLoadBalancerDeleted(ctx, "cluster", mustGetService(t, kube, "default", "web")); err != nil {
+		t.Fatalf("delete before reserve: %v", err)
+	}
+	if prism.unreserveCalls != 0 {
+		t.Fatalf("unreserve calls = %d, want 0", prism.unreserveCalls)
+	}
+}
+
+func TestAutoIPAMEnsureDeletedForeignPool(t *testing.T) {
+	ctx := context.Background()
+	prism := &countingPrism{}
+	kube, dyn := newClients(reservedService("default", "web", "uid-web"))
+	foreign := newIPAddressPool("metallb-system", "uid-web", "10.9.9.9", "other-subnet", "other-reservation")
+	foreign.Labels[constants.LoadBalancerServiceUIDLabel] = "someone-else"
+	if err := createPool(t, dyn, foreign); err != nil {
+		t.Fatal(err)
+	}
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+	if err := strategy.EnsureLoadBalancerDeleted(ctx, "cluster", mustGetService(t, kube, "default", "web")); err != nil {
+		t.Fatalf("EnsureLoadBalancerDeleted: %v", err)
+	}
+	if prism.unreserveCalls != 1 || prism.lastUnreserve.clientContext != testContext(t, "uid-web") || prism.lastUnreserve.subnet != "stored-subnet" {
+		t.Fatalf("unreserve = %+v calls=%d", prism.lastUnreserve, prism.unreserveCalls)
+	}
+	if !poolExists(t, dyn, "metallb-system", "uid-web") {
+		t.Fatal("foreign pool was deleted")
+	}
+	if hasReservationAnnotations(mustGetService(t, kube, "default", "web")) {
+		t.Fatal("annotations were not cleared")
+	}
+}
+
+func TestAutoIPAMEnsureDeletedPoolDeleteFailure(t *testing.T) {
+	ctx := context.Background()
+	prism := &countingPrism{}
+	kube, dyn := newClients(reservedService("default", "web", "uid-web"))
+	if err := createPool(t, dyn, newIPAddressPool("metallb-system", "uid-web", "10.4.0.1", "stored-subnet", "res-1")); err != nil {
+		t.Fatal(err)
+	}
+	dyn.PrependReactor("delete", "ipaddresspools", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("pool delete failed")
+	})
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+	if err := strategy.EnsureLoadBalancerDeleted(ctx, "cluster", mustGetService(t, kube, "default", "web")); err == nil {
+		t.Fatal("expected pool delete error, got nil")
+	}
+	if prism.unreserveCalls != 1 {
+		t.Fatalf("unreserve calls = %d, want 1", prism.unreserveCalls)
+	}
+	got := mustGetService(t, kube, "default", "web")
+	if !hasReservationAnnotations(got) {
+		t.Fatal("pool delete failure cleared annotations")
+	}
+	if _, exists, err := strategy.GetLoadBalancer(ctx, "cluster", got); err != nil || !exists {
+		t.Fatalf("GetLoadBalancer exists=%v err=%v, want exists", exists, err)
+	}
+}
+
+func TestAutoIPAMEnsureDeletedServiceAlreadyGone(t *testing.T) {
+	ctx := context.Background()
+	prism := &countingPrism{}
+	kube, dyn := newClients()
+	if err := createPool(t, dyn, newIPAddressPool("metallb-system", "uid-web", "10.4.0.1", "stored-subnet", "res-1")); err != nil {
+		t.Fatal(err)
+	}
+	strategy := newAutoStrategy(config.AutoIPAMMetalLB{ClusterUID: testClusterUID}, prism.Prism(), kube, dyn)
+	if err := strategy.EnsureLoadBalancerDeleted(ctx, "cluster", reservedService("default", "web", "uid-web")); err != nil {
+		t.Fatalf("delete of missing service: %v", err)
+	}
+	if prism.unreserveCalls != 1 || prism.lastUnreserve.subnet != "stored-subnet" || prism.lastUnreserve.clientContext != testContext(t, "uid-web") {
+		t.Fatalf("unreserve = %+v calls=%d", prism.lastUnreserve, prism.unreserveCalls)
+	}
+	if poolExists(t, dyn, "metallb-system", "uid-web") {
+		t.Fatal("pool was not deleted after the service was gone")
+	}
+}
+
+func TestAutoIPAMEnsureDeletedReservationIDOnly(t *testing.T) {
+	ctx := context.Background()
+	svc := lbService("default", "web", "uid-web")
+	svc.Annotations = map[string]string{constants.LoadBalancerReservationIDAnnotation: "res-1"}
+	prism := &countingPrism{}
+	kube, dyn := newClients(svc)
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+	if err := strategy.EnsureLoadBalancerDeleted(ctx, "cluster", mustGetService(t, kube, "default", "web")); err != nil {
+		t.Fatalf("EnsureLoadBalancerDeleted: %v", err)
+	}
+	if prism.unreserveCalls != 1 || prism.lastUnreserve.subnet != "subnet-ext" || prism.lastUnreserve.clientContext != testContext(t, "uid-web") {
+		t.Fatalf("unreserve = %+v calls=%d, want config subnet", prism.lastUnreserve, prism.unreserveCalls)
+	}
+	if hasReservationAnnotations(mustGetService(t, kube, "default", "web")) {
+		t.Fatal("reservation id was not cleared")
+	}
+}
+
+func TestAutoIPAMEnsureDeletedMissingSubnet(t *testing.T) {
+	ctx := context.Background()
+	svc := lbService("default", "web", "uid-web")
+	svc.Annotations = map[string]string{constants.LoadBalancerReservationIDAnnotation: "res-1"}
+	prism := &countingPrism{}
+	kube, dyn := newClients(svc)
+	strategy := newAutoStrategy(config.AutoIPAMMetalLB{}, prism.Prism(), kube, dyn)
+	if err := strategy.EnsureLoadBalancerDeleted(ctx, "cluster", mustGetService(t, kube, "default", "web")); err == nil {
+		t.Fatal("expected missing subnet error, got nil")
+	}
+	if prism.unreserveCalls != 0 {
+		t.Fatalf("unreserve calls = %d, want 0", prism.unreserveCalls)
+	}
+	if mustGetService(t, kube, "default", "web").Annotations[constants.LoadBalancerReservationIDAnnotation] != "res-1" {
+		t.Fatal("missing subnet cleared the reservation id")
+	}
+}
+
+// countingPrism is a fake Prism that counts calls and keeps the reservations it
+// hands out, so ReservedIPs answers from the same state a real PC would.
+type countingPrism struct {
+	reserveCalls   int
+	unreserveCalls int
+	resolveCalls   int
+	ip             string
+	lastSubnet     string
+	resolveTo      string
+	reserveErr     error
+	unreserveErr   error
+	reservedErr    error
+	resolveErr     error
+	onReserve      func()
+	onResolve      func()
+	lastUnreserve  unreserveCall
+	lastResolve    resolveCall
+	held           map[string][]string
+
+	// unreserveErrs returns one error per unreserve call, in order, so a test
+	// can make the first attempt fail terminally and the retry succeed.
+	unreserveErrs []error
+	// unreserveRequestIDs records the NTNX-Request-Id of every unreserve.
+	unreserveRequestIDs []string
+}
+
+// hold records a reservation that exists before the test starts.
+func (c *countingPrism) hold(clientContext, ip string) {
+	if c.held == nil {
+		c.held = map[string][]string{}
+	}
+	c.held[clientContext] = append(c.held[clientContext], ip)
+}
+
+type unreserveCall struct {
+	subnet, requestID, clientContext string
+}
+
+type resolveCall struct {
+	subnet, cluster string
+}
+
+func (c *countingPrism) Prism() *mock.MockPrism {
+	return &mock.MockPrism{
+		ResolveSubnetOverride: func(_ context.Context, subnetExtIDOrName, cluster string) (string, error) {
+			c.resolveCalls++
+			c.lastResolve = resolveCall{subnet: subnetExtIDOrName, cluster: cluster}
+			if c.onResolve != nil {
+				c.onResolve()
+			}
+			if c.resolveErr != nil {
+				return "", c.resolveErr
+			}
+			if c.resolveTo != "" {
+				return c.resolveTo, nil
+			}
+			return subnetExtIDOrName, nil
+		},
+		ReserveIPOverride: func(_ context.Context, subnet, _, clientContext string) (string, error) {
+			c.reserveCalls++
+			c.lastSubnet = subnet
+			if c.onReserve != nil {
+				c.onReserve()
+			}
+			if c.reserveErr != nil {
+				return "", c.reserveErr
+			}
+			c.hold(clientContext, c.ip)
+			return c.ip, nil
+		},
+		UnreserveIPOverride: func(_ context.Context, subnet, requestID, clientContext string) error {
+			c.unreserveCalls++
+			c.unreserveRequestIDs = append(c.unreserveRequestIDs, requestID)
+			c.lastUnreserve = unreserveCall{subnet: subnet, requestID: requestID, clientContext: clientContext}
+			if len(c.unreserveErrs) > 0 {
+				err := c.unreserveErrs[0]
+				c.unreserveErrs = c.unreserveErrs[1:]
+				if err != nil {
+					return err
+				}
+			} else if c.unreserveErr != nil {
+				return c.unreserveErr
+			}
+			delete(c.held, clientContext)
+			return nil
+		},
+		ReservedIPsOverride: func(_ context.Context, _, clientContext string) ([]string, error) {
+			if c.reservedErr != nil {
+				return nil, c.reservedErr
+			}
+			return c.held[clientContext], nil
+		},
+	}
+}
+
+func createPool(t *testing.T, dyn dynamic.Interface, pool *metallbv1beta1.IPAddressPool) error {
+	t.Helper()
+	obj, err := unstructuredFromPool(pool)
+	if err != nil {
+		return err
+	}
+	_, err = dyn.Resource(ipAddressPoolGVR).Namespace(pool.Namespace).Create(context.Background(), obj, metav1.CreateOptions{})
+	return err
+}
+
+// testClusterUID is the Cluster UID every test config carries. Prism stores the
+// derived context, not the Service UID, so tests must hold and assert on it.
+const testClusterUID = "0f1b17bc-289f-4cc2-b558-6eef10065e57"
+
+func testAutoConfig() config.AutoIPAMMetalLB {
+	return config.AutoIPAMMetalLB{Subnet: "subnet-ext", ClusterUID: testClusterUID, MetalLBNamespace: "metallb-system"}
+}
+
+// testContext is the clientContext Prism sees for a Service in these tests.
+func testContext(t *testing.T, serviceUID string) string {
+	t.Helper()
+	context, err := serviceClientContext(testClusterUID, serviceUID)
+	if err != nil {
+		t.Fatalf("serviceClientContext(%q): %v", serviceUID, err)
+	}
+	return context
+}
+
+func newAutoStrategy(cfg config.AutoIPAMMetalLB, prism interfaces.Prism, kube kubernetes.Interface, dyn dynamic.Interface) *AutoIPAMMetalLB {
+	return &AutoIPAMMetalLB{config: cfg, deps: Dependencies{Prism: prism, Kube: kube, Dynamic: dyn}}
+}
+
+func newClients(services ...*v1.Service) (kubernetes.Interface, *dynamicfake.FakeDynamicClient) {
+	objs := make([]runtime.Object, 0, len(services))
+	for _, svc := range services {
+		objs = append(objs, svc)
+	}
+	return fake.NewSimpleClientset(objs...), dynamicfake.NewSimpleDynamicClient(runtime.NewScheme())
+}
+
+func lbService(namespace, name, uid string) *v1.Service {
+	return &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			UID:       types.UID(uid),
+		},
+		Spec: v1.ServiceSpec{Type: v1.ServiceTypeLoadBalancer},
+	}
+}
+
+func reservedService(namespace, name, uid string) *v1.Service {
+	svc := lbService(namespace, name, uid)
+	svc.Finalizers = []string{servicehelpers.LoadBalancerCleanupFinalizer}
+	svc.Annotations = map[string]string{
+		constants.LoadBalancerReservationIDAnnotation: "res-1",
+		constants.LoadBalancerIPAnnotation:            "10.4.0.1",
+		constants.LoadBalancerSubnetAnnotation:        "stored-subnet",
+		constants.MetalLBRequestedIPsAnnotation:       "10.4.0.1",
+	}
+	return svc
+}
+
+func mustGetService(t *testing.T, kube kubernetes.Interface, namespace, name string) *v1.Service {
+	t.Helper()
+	svc, err := kube.CoreV1().Services(namespace).Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get service %s/%s: %v", namespace, name, err)
+	}
+	return svc
+}
+
+func mustGetPool(t *testing.T, dyn dynamic.Interface, namespace, name string) *metallbv1beta1.IPAddressPool {
+	t.Helper()
+	obj, err := dyn.Resource(ipAddressPoolGVR).Namespace(namespace).Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get pool %s/%s: %v", namespace, name, err)
+	}
+	pool, err := poolFromUnstructured(obj)
+	if err != nil {
+		t.Fatalf("decode pool %s/%s: %v", namespace, name, err)
+	}
+	return pool
+}
+
+func poolExists(t *testing.T, dyn dynamic.Interface, namespace, name string) bool {
+	t.Helper()
+	_, err := dyn.Resource(ipAddressPoolGVR).Namespace(namespace).Get(context.Background(), name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return false
+	}
+	if err != nil {
+		t.Fatalf("get pool %s/%s: %v", namespace, name, err)
+	}
+	return true
+}
+
+func assertNoPoolOrMetalLB(t *testing.T, kube kubernetes.Interface, dyn dynamic.Interface, svc *v1.Service) {
+	t.Helper()
+	if svc.Annotations[constants.MetalLBRequestedIPsAnnotation] != "" {
+		t.Fatal("MetalLB annotation is set")
+	}
+	if poolExists(t, dyn, "metallb-system", string(svc.UID)) {
+		t.Fatal("pool exists")
+	}
+	_ = kube
+}
+
+func assertPool(t *testing.T, pool *metallbv1beta1.IPAddressPool, uid, reservationID, subnet, ip string) {
+	t.Helper()
+	if len(pool.Spec.Addresses) != 1 || pool.Spec.Addresses[0] != ip+"/32" {
+		t.Fatalf("addresses = %#v, want %s/32", pool.Spec.Addresses, ip)
+	}
+	if pool.Spec.AutoAssign == nil || *pool.Spec.AutoAssign {
+		t.Fatalf("autoAssign = %#v, want false", pool.Spec.AutoAssign)
+	}
+	labels := pool.Labels
+	if labels[constants.LoadBalancerServiceUIDLabel] != uid ||
+		labels[constants.LoadBalancerReservationIDLabel] != reservationID ||
+		labels[constants.LoadBalancerSubnetLabel] != subnet ||
+		labels[constants.LoadBalancerIPLabel] != ip ||
+		labels[constants.LoadBalancerPoolTypeLabel] != constants.LoadBalancerPoolTypeAutoIPAMMetalLB {
+		t.Fatalf("labels = %#v", labels)
+	}
+}
+
+func hasFinalizer(svc *v1.Service, finalizer string) bool {
+	for _, f := range svc.Finalizers {
+		if f == finalizer {
+			return true
+		}
+	}
+	return false
+}
+
+// A persisted address that Prism no longer holds must not be advertised. The
+// Service keeps its annotations if CCM dies between unreserve and the clearing
+// update, and MetalLB would otherwise announce an address Prism can hand to a
+// VM (NCN-113131).
+func TestAutoIPAMStaleIPAnnotationIsReReserved(t *testing.T) {
+	ctx := context.Background()
+	svc := reservedService("default", "web", "uid-web")
+	svc.Annotations[constants.LoadBalancerSubnetAnnotation] = "subnet-ext"
+	svc.Finalizers = nil
+
+	prism := &countingPrism{ip: "10.9.0.5"} // Prism holds nothing for uid-web.
+	kube, dyn := newClients(svc)
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+
+	status, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil)
+	if err != nil {
+		t.Fatalf("EnsureLoadBalancer: %v", err)
+	}
+	if prism.reserveCalls != 1 {
+		t.Fatalf("ReserveIP calls = %d, want 1", prism.reserveCalls)
+	}
+	if status.Ingress[0].IP != "10.9.0.5" {
+		t.Fatalf("status IP = %q, want the newly reserved 10.9.0.5", status.Ingress[0].IP)
+	}
+
+	got := mustGetService(t, kube, "default", "web")
+	if got.Annotations[constants.LoadBalancerIPAnnotation] != "10.9.0.5" {
+		t.Fatalf("IP annotation = %q, want 10.9.0.5", got.Annotations[constants.LoadBalancerIPAnnotation])
+	}
+	if id := got.Annotations[constants.LoadBalancerReservationIDAnnotation]; id == "res-1" || id == "" {
+		t.Fatalf("reservation id = %q, want a fresh id", id)
+	}
+	assertPool(t, mustGetPool(t, dyn, "metallb-system", "uid-web"), "uid-web",
+		got.Annotations[constants.LoadBalancerReservationIDAnnotation], "subnet-ext", "10.9.0.5")
+}
+
+// A confirm that cannot reach Prism must fail rather than fall through to
+// advertising an unconfirmed address.
+func TestAutoIPAMConfirmErrorDoesNotAdvertise(t *testing.T) {
+	ctx := context.Background()
+	svc := reservedService("default", "web", "uid-web")
+	svc.Annotations[constants.LoadBalancerSubnetAnnotation] = "subnet-ext"
+	svc.Finalizers = nil
+
+	prism := &countingPrism{ip: "10.9.0.6", reservedErr: errors.New("prism unavailable")}
+	kube, dyn := newClients(svc)
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+
+	if _, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil); err == nil {
+		t.Fatal("expected confirm error, got nil")
+	}
+	if prism.reserveCalls != 0 {
+		t.Fatalf("ReserveIP calls = %d, want 0", prism.reserveCalls)
+	}
+	if poolExists(t, dyn, "metallb-system", "uid-web") {
+		t.Fatal("an unconfirmed address was advertised")
+	}
+}
+
+// A confirmed reservation is left alone: no re-reserve, no annotation churn.
+func TestAutoIPAMHeldReservationIsKept(t *testing.T) {
+	ctx := context.Background()
+	svc := reservedService("default", "web", "uid-web")
+	svc.Annotations[constants.LoadBalancerSubnetAnnotation] = "subnet-ext"
+	svc.Finalizers = nil
+
+	prism := &countingPrism{ip: "10.9.0.7"}
+	prism.hold(testContext(t, "uid-web"), "10.4.0.1")
+	kube, dyn := newClients(svc)
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+
+	status, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil)
+	if err != nil {
+		t.Fatalf("EnsureLoadBalancer: %v", err)
+	}
+	if prism.reserveCalls != 0 || status.Ingress[0].IP != "10.4.0.1" {
+		t.Fatalf("reserveCalls=%d ip=%s, want 0 and 10.4.0.1", prism.reserveCalls, status.Ingress[0].IP)
+	}
+	got := mustGetService(t, kube, "default", "web")
+	if got.Annotations[constants.LoadBalancerReservationIDAnnotation] != "res-1" {
+		t.Fatalf("reservation id = %q, want res-1 kept",
+			got.Annotations[constants.LoadBalancerReservationIDAnnotation])
+	}
+}
+
+// Two reservations of the same Service must not share an unreserve request id:
+// Prism dedupes by replaying the first task, so a shared id would report a
+// release that never happened and leak the second address.
+func TestUnreserveRequestIDIsPerReservation(t *testing.T) {
+	first := unreserveRequestID("res-1")
+	second := unreserveRequestID("res-2")
+	if first == second {
+		t.Fatalf("request id %q reused across reservations", first)
+	}
+	if first != unreserveRequestID("res-1") {
+		t.Fatal("request id is not stable for one reservation, so a retry would not dedupe")
+	}
+	if unreserveRequestID("") == unreserveRequestID("") {
+		t.Fatal("an absent reservation id must yield a fresh request id")
+	}
+}
+
+// A subnet name is resolved to an extID once per process, and the extID is what
+// is reserved, annotated and labelled. Nothing persists the name, so a later
+// config change between a name and its own extID cannot orphan a reservation.
+func TestAutoIPAMResolvesSubnetNameOnce(t *testing.T) {
+	ctx := context.Background()
+	web := lbService("default", "web", "uid-web")
+	api := lbService("default", "api", "uid-api")
+
+	prism := &countingPrism{ip: "10.4.0.1", resolveTo: "subnet-uuid"}
+	kube, dyn := newClients(web, api)
+	cfg := config.AutoIPAMMetalLB{Subnet: "vlan170", Cluster: "pe-1", ClusterUID: testClusterUID, MetalLBNamespace: "metallb-system"}
+	strategy := newAutoStrategy(cfg, prism.Prism(), kube, dyn)
+
+	for _, name := range []string{"web", "api"} {
+		if _, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", name), nil); err != nil {
+			t.Fatalf("EnsureLoadBalancer %s: %v", name, err)
+		}
+	}
+
+	if prism.resolveCalls != 1 {
+		t.Fatalf("ResolveSubnet calls = %d, want 1 (memoised)", prism.resolveCalls)
+	}
+	if prism.lastResolve != (resolveCall{subnet: "vlan170", cluster: "pe-1"}) {
+		t.Fatalf("ResolveSubnet args = %#v, want the configured name and cluster", prism.lastResolve)
+	}
+	if prism.lastSubnet != "subnet-uuid" {
+		t.Fatalf("ReserveIP subnet = %q, want the resolved extID", prism.lastSubnet)
+	}
+
+	got := mustGetService(t, kube, "default", "web")
+	if subnet := got.Annotations[constants.LoadBalancerSubnetAnnotation]; subnet != "subnet-uuid" {
+		t.Fatalf("subnet annotation = %q, want the resolved extID", subnet)
+	}
+	assertPool(t, mustGetPool(t, dyn, "metallb-system", "uid-web"), "uid-web",
+		got.Annotations[constants.LoadBalancerReservationIDAnnotation], "subnet-uuid", "10.4.0.1")
+}
+
+// A name that cannot be resolved must fail before any reservation or pool, so
+// an ambiguous or absent subnet never reserves an address nobody can release.
+func TestAutoIPAMResolveErrorBlocksReserve(t *testing.T) {
+	ctx := context.Background()
+	svc := lbService("default", "web", "uid-web")
+
+	prism := &countingPrism{ip: "10.4.0.1", resolveErr: errors.New(`subnet name "shared" matches 2 subnets`)}
+	kube, dyn := newClients(svc)
+	cfg := config.AutoIPAMMetalLB{Subnet: "shared", ClusterUID: testClusterUID, MetalLBNamespace: "metallb-system"}
+	strategy := newAutoStrategy(cfg, prism.Prism(), kube, dyn)
+
+	if _, err := strategy.EnsureLoadBalancer(ctx, "cluster", svc, nil); err == nil {
+		t.Fatal("EnsureLoadBalancer succeeded with an unresolvable subnet")
+	}
+	if prism.reserveCalls != 0 {
+		t.Fatalf("ReserveIP calls = %d, want 0", prism.reserveCalls)
+	}
+	if poolExists(t, dyn, "metallb-system", "uid-web") {
+		t.Fatal("a pool was created for an unresolvable subnet")
+	}
+	if mustGetService(t, kube, "default", "web").Annotations[constants.LoadBalancerReservationIDAnnotation] != "" {
+		t.Fatal("a reservation id was persisted for an unresolvable subnet")
+	}
+}
+
+// Only a successful resolution is cached, so a Prism outage at the first
+// Service does not wedge the strategy for the life of the process.
+func TestAutoIPAMResolveErrorIsNotCached(t *testing.T) {
+	ctx := context.Background()
+	svc := lbService("default", "web", "uid-web")
+
+	prism := &countingPrism{ip: "10.4.0.1", resolveTo: "subnet-uuid", resolveErr: errors.New("prism unavailable")}
+	kube, dyn := newClients(svc)
+	cfg := config.AutoIPAMMetalLB{Subnet: "vlan170", ClusterUID: testClusterUID, MetalLBNamespace: "metallb-system"}
+	strategy := newAutoStrategy(cfg, prism.Prism(), kube, dyn)
+
+	if _, err := strategy.EnsureLoadBalancer(ctx, "cluster", svc, nil); err == nil {
+		t.Fatal("EnsureLoadBalancer succeeded while Prism was unavailable")
+	}
+
+	prism.resolveErr = nil
+	if _, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil); err != nil {
+		t.Fatalf("EnsureLoadBalancer retry: %v", err)
+	}
+	if prism.resolveCalls != 2 {
+		t.Fatalf("ResolveSubnet calls = %d, want 2 (the failure is not cached)", prism.resolveCalls)
+	}
+	if prism.lastSubnet != "subnet-uuid" {
+		t.Fatalf("ReserveIP subnet = %q, want the resolved extID", prism.lastSubnet)
+	}
+}
+
+// Delete uses the recorded subnet without resolving. The record is already an
+// extID, and resolving would send a needless Prism call on every teardown.
+func TestAutoIPAMDeleteUsesRecordedSubnetWithoutResolving(t *testing.T) {
+	ctx := context.Background()
+	svc := reservedService("default", "web", "uid-web")
+
+	prism := &countingPrism{ip: "10.4.0.1", resolveTo: "subnet-uuid"}
+	prism.hold(testContext(t, "uid-web"), "10.4.0.1")
+	kube, dyn := newClients(svc)
+	cfg := config.AutoIPAMMetalLB{Subnet: "vlan170", ClusterUID: testClusterUID, MetalLBNamespace: "metallb-system"}
+	strategy := newAutoStrategy(cfg, prism.Prism(), kube, dyn)
+
+	if err := strategy.EnsureLoadBalancerDeleted(ctx, "cluster", svc); err != nil {
+		t.Fatalf("EnsureLoadBalancerDeleted: %v", err)
+	}
+	if prism.resolveCalls != 0 {
+		t.Fatalf("ResolveSubnet calls = %d, want 0", prism.resolveCalls)
+	}
+	if prism.lastUnreserve.subnet != "stored-subnet" {
+		t.Fatalf("UnreserveIP subnet = %q, want the recorded subnet", prism.lastUnreserve.subnet)
+	}
+}
+
+// A reservation whose subnet record was lost falls back to the configured
+// subnet, which must be resolved before it reaches Prism.
+func TestAutoIPAMDeleteResolvesWhenSubnetRecordIsLost(t *testing.T) {
+	ctx := context.Background()
+	svc := reservedService("default", "web", "uid-web")
+	delete(svc.Annotations, constants.LoadBalancerSubnetAnnotation)
+
+	prism := &countingPrism{ip: "10.4.0.1", resolveTo: "subnet-uuid"}
+	prism.hold(testContext(t, "uid-web"), "10.4.0.1")
+	kube, dyn := newClients(svc)
+	cfg := config.AutoIPAMMetalLB{Subnet: "vlan170", Cluster: "pe-1", ClusterUID: testClusterUID, MetalLBNamespace: "metallb-system"}
+	strategy := newAutoStrategy(cfg, prism.Prism(), kube, dyn)
+
+	if err := strategy.EnsureLoadBalancerDeleted(ctx, "cluster", mustGetService(t, kube, "default", "web")); err != nil {
+		t.Fatalf("EnsureLoadBalancerDeleted: %v", err)
+	}
+	if prism.resolveCalls != 1 {
+		t.Fatalf("ResolveSubnet calls = %d, want 1", prism.resolveCalls)
+	}
+	if prism.lastUnreserve.subnet != "subnet-uuid" {
+		t.Fatalf("UnreserveIP subnet = %q, want the resolved extID", prism.lastUnreserve.subnet)
+	}
+}
+
+// A reserve whose address was never persisted leaves Prism holding an address
+// only it knows about. The next pass must adopt it, not reserve a second one.
+func TestAutoIPAMAdoptsAnUnrecordedReservation(t *testing.T) {
+	ctx := context.Background()
+	svc := lbService("default", "web", "uid-web")
+	// The reservation id survived; the address did not.
+	svc.Annotations = map[string]string{constants.LoadBalancerReservationIDAnnotation: "res-1"}
+
+	prism := &countingPrism{ip: "10.4.0.99"}
+	prism.hold(testContext(t, "uid-web"), "10.4.0.7")
+	kube, dyn := newClients(svc)
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+
+	status, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil)
+	if err != nil {
+		t.Fatalf("EnsureLoadBalancer: %v", err)
+	}
+	if prism.reserveCalls != 0 {
+		t.Fatalf("ReserveIP calls = %d, want 0: the held address must be adopted", prism.reserveCalls)
+	}
+	if status.Ingress[0].IP != "10.4.0.7" {
+		t.Fatalf("status IP = %q, want the adopted 10.4.0.7", status.Ingress[0].IP)
+	}
+	got := mustGetService(t, kube, "default", "web")
+	if got.Annotations[constants.LoadBalancerIPAnnotation] != "10.4.0.7" {
+		t.Fatalf("IP annotation = %q, want 10.4.0.7", got.Annotations[constants.LoadBalancerIPAnnotation])
+	}
+	if got.Annotations[constants.LoadBalancerSubnetAnnotation] != "subnet-ext" {
+		t.Fatalf("subnet annotation = %q", got.Annotations[constants.LoadBalancerSubnetAnnotation])
+	}
+	assertPool(t, mustGetPool(t, dyn, "metallb-system", "uid-web"), "uid-web", "res-1", "subnet-ext", "10.4.0.7")
+}
+
+// Adoption must be deterministic when a past leak left two addresses under one
+// context, or successive reconciles would advertise different addresses.
+func TestAutoIPAMAdoptionIsDeterministic(t *testing.T) {
+	ctx := context.Background()
+	svc := lbService("default", "web", "uid-web")
+
+	prism := &countingPrism{ip: "10.4.0.99"}
+	prism.hold(testContext(t, "uid-web"), "10.4.0.30")
+	prism.hold(testContext(t, "uid-web"), "10.4.0.20")
+	kube, dyn := newClients(svc)
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+
+	for pass := range 2 {
+		status, err := strategy.EnsureLoadBalancer(ctx, "cluster", mustGetService(t, kube, "default", "web"), nil)
+		if err != nil {
+			t.Fatalf("EnsureLoadBalancer pass %d: %v", pass, err)
+		}
+		if status.Ingress[0].IP != "10.4.0.20" {
+			t.Fatalf("pass %d status IP = %q, want the lowest held address", pass, status.Ingress[0].IP)
+		}
+	}
+	if prism.reserveCalls != 0 {
+		t.Fatalf("ReserveIP calls = %d, want 0", prism.reserveCalls)
+	}
+}
+
+// Prism stores the cluster-scoped context, not the Service UID: that is what a
+// cluster teardown matches on once the workload cluster is unreachable.
+func TestAutoIPAMReservesUnderTheClusterScopedContext(t *testing.T) {
+	ctx := context.Background()
+	svc := lbService("default", "web", "uid-web")
+
+	prism := &countingPrism{ip: "10.4.0.1"}
+	kube, dyn := newClients(svc)
+	strategy := newAutoStrategy(testAutoConfig(), prism.Prism(), kube, dyn)
+
+	if _, err := strategy.EnsureLoadBalancer(ctx, "cluster", svc, nil); err != nil {
+		t.Fatalf("EnsureLoadBalancer: %v", err)
+	}
+
+	want := testContext(t, "uid-web")
+	if _, ok := prism.held[want]; !ok {
+		t.Fatalf("nothing reserved under %q; held = %v", want, prism.held)
+	}
+	if _, ok := prism.held["uid-web"]; ok {
+		t.Fatal("the bare Service UID was used as the reservation context")
+	}
+	if !strings.HasPrefix(want, clusterContextPrefix(testClusterUID)) {
+		t.Fatalf("context %q does not carry this cluster's prefix", want)
+	}
+}
+
+// An empty clusterUID must fail before any reservation: an address reserved
+// without cluster identity cannot be released by a cluster teardown.
+func TestAutoIPAMMissingClusterUIDFailsBeforeReserve(t *testing.T) {
+	ctx := context.Background()
+	svc := lbService("default", "web", "uid-web")
+
+	prism := &countingPrism{ip: "10.4.0.1"}
+	kube, dyn := newClients(svc)
+	strategy := newAutoStrategy(config.AutoIPAMMetalLB{Subnet: "subnet-ext"}, prism.Prism(), kube, dyn)
+
+	_, err := strategy.EnsureLoadBalancer(ctx, "cluster", svc, nil)
+	if err == nil || !strings.Contains(err.Error(), "clusterUID is required") {
+		t.Fatalf("error = %v, want the missing clusterUID message", err)
+	}
+	if prism.reserveCalls != 0 {
+		t.Fatalf("ReserveIP calls = %d, want 0", prism.reserveCalls)
+	}
+	if poolExists(t, dyn, "metallb-system", "uid-web") {
+		t.Fatal("a pool was created without cluster identity")
+	}
+}

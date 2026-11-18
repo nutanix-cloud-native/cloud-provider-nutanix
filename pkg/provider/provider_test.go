@@ -82,9 +82,9 @@ var _ = Describe("Test Provider", func() { //nolint:typecheck
 	})
 
 	Context("Test LoadBalancer", func() {
-		It("should not support load balancer functionality", func() {
+		It("should support load balancer functionality (strategy dispatcher)", func() {
 			nc, b := ntnxCloud.LoadBalancer()
-			Expect(b).To(BeFalse())
+			Expect(b).To(BeTrue())
 			Expect(nc).To(Equal(&ntnxCloud))
 		})
 	})

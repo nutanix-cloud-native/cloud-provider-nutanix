@@ -18,6 +18,7 @@ package interfaces
 
 import (
 	"context"
+	"errors"
 
 	clusterModels "github.com/nutanix/ntnx-api-golang-clients/clustermgmt-go-client/v4/models/clustermgmt/v4/config"
 	multidomainModels "github.com/nutanix/ntnx-api-golang-clients/multidomain-go-client/v4/models/multidomain/v4/config"
@@ -31,8 +32,40 @@ type Client interface {
 	SetInformers(sharedInformers informers.SharedInformerFactory)
 }
 
+var (
+	// ErrIPTaskPending means a Prism IP reserve or unreserve task did not reach a
+	// terminal status before the wait timed out. Callers retry. Both a reserve and
+	// an unreserve retry must reuse the request id of the attempt they resume, so
+	// that a pending task is resumed rather than a second one started.
+	ErrIPTaskPending = errors.New("prism ip task is pending")
+
+	// ErrIPReservationTerminal means the reserve or unreserve task failed and will
+	// not succeed if the same request id is reused. Unreserve callers should
+	// retry with a fresh request id while keeping the same clientContext.
+	ErrIPReservationTerminal = errors.New("prism ip reservation failed")
+)
+
 type Prism interface {
 	IsProjectScoped(ctx context.Context) bool
+	// ReserveIP reserves one address on subnetExtID and waits for the Prism task
+	// to finish. requestID is the idempotency key. clientContext is stored with
+	// the reservation. A wait timeout returns ErrIPTaskPending. A failed task
+	// returns ErrIPReservationTerminal.
+	ReserveIP(ctx context.Context, subnetExtID, requestID, clientContext string) (string, error)
+	// UnreserveIP releases the reservation stored under clientContext on
+	// subnetExtID and waits for the Prism task. requestID is the idempotency key.
+	// A reservation that is already gone returns nil. A wait timeout returns
+	// ErrIPTaskPending. A failed task returns ErrIPReservationTerminal.
+	UnreserveIP(ctx context.Context, subnetExtID, requestID, clientContext string) error
+	// ReservedIPs returns the addresses on subnetExtID currently reserved under
+	// clientContext. An empty result means that context holds no reservation.
+	ReservedIPs(ctx context.Context, subnetExtID, clientContext string) ([]string, error)
+	// ResolveSubnet returns the extID of the subnet named by subnetExtIDOrName.
+	// A value that parses as a UUID is read back from Prism and returned. A name
+	// must match exactly one subnet; cluster, a Prism Element name or extID,
+	// narrows subnets that declare a cluster. An ambiguous name is an error
+	// rather than a guess.
+	ResolveSubnet(ctx context.Context, subnetExtIDOrName, cluster string) (string, error)
 	GetVM(ctx context.Context, vmUUID string) (*vmmModels.Vm, error)
 	GetVMByBiosUUid(ctx context.Context, biosUUID string) (*vmmModels.Vm, error)
 	GetCluster(ctx context.Context, clusterUUID string) (*clusterModels.Cluster, error)

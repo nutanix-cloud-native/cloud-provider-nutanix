@@ -57,6 +57,13 @@ data:
             }
           },
           "enableCustomLabeling": ${CCM_CUSTOM_LABEL=false},
+          "loadBalancer": {
+            "defaultStrategy": "${NUTANIX_LOADBALANCER_STRATEGY=None}",
+            "autoIPAMMetalLB": {
+              "subnet": "${NUTANIX_SUBNET_EXTID=}",
+              "metalLBNamespace": "metallb-system"
+            }
+          },
           "topologyDiscovery": {
             "type": "Prism"
           }
@@ -86,6 +93,35 @@ data:
           - get
           - list
           - watch
+      - apiGroups:
+          - ""
+        resources:
+          - services
+        verbs:
+          - get
+          - list
+          - watch
+          - patch
+          - update
+      - apiGroups:
+          - ""
+        resources:
+          - services/status
+        verbs:
+          - patch
+          - update
+      - apiGroups:
+          - metallb.io
+        resources:
+          - ipaddresspools
+        verbs:
+          - get
+          - list
+          - watch
+          - create
+          - update
+          - patch
+          - delete
       - apiGroups:
           - ""
         resources:

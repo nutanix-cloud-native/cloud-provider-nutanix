@@ -39,6 +39,10 @@ type MockPrism struct {
 	GetPrismCentralVersionOverride func(ctx context.Context) (string, error)
 	GetResourceGroupsOverride      func(ctx context.Context) ([]multidomainModels.ResourceGroup, error)
 	ListDomainManagersOverride     func(ctx context.Context) ([]prismModels.DomainManager, error)
+	ReserveIPOverride              func(ctx context.Context, subnetExtID, requestID, clientContext string) (string, error)
+	UnreserveIPOverride            func(ctx context.Context, subnetExtID, requestID, clientContext string) error
+	ReservedIPsOverride            func(ctx context.Context, subnetExtID, clientContext string) ([]string, error)
+	ResolveSubnetOverride          func(ctx context.Context, subnetExtIDOrName, cluster string) (string, error)
 }
 
 func (mp *MockPrism) IsProjectScoped(ctx context.Context) bool {
@@ -164,4 +168,34 @@ func (mp *MockPrism) GetPrismCentralVersion(ctx context.Context) (string, error)
 		return mp.GetPrismCentralVersionOverride(ctx)
 	}
 	return MockPrismCentralVersion, nil
+}
+
+func (mp *MockPrism) ReserveIP(ctx context.Context, subnetExtID, requestID, clientContext string) (string, error) {
+	if mp.ReserveIPOverride != nil {
+		return mp.ReserveIPOverride(ctx, subnetExtID, requestID, clientContext)
+	}
+	return "", fmt.Errorf("ReserveIP not implemented")
+}
+
+func (mp *MockPrism) UnreserveIP(ctx context.Context, subnetExtID, requestID, clientContext string) error {
+	if mp.UnreserveIPOverride != nil {
+		return mp.UnreserveIPOverride(ctx, subnetExtID, requestID, clientContext)
+	}
+	return fmt.Errorf("UnreserveIP not implemented")
+}
+
+func (mp *MockPrism) ReservedIPs(ctx context.Context, subnetExtID, clientContext string) ([]string, error) {
+	if mp.ReservedIPsOverride != nil {
+		return mp.ReservedIPsOverride(ctx, subnetExtID, clientContext)
+	}
+	return nil, fmt.Errorf("ReservedIPs not implemented")
+}
+
+// ResolveSubnet echoes subnetExtIDOrName unless an override is set, so a test
+// that configures an extID needs no stub.
+func (mp *MockPrism) ResolveSubnet(ctx context.Context, subnetExtIDOrName, cluster string) (string, error) {
+	if mp.ResolveSubnetOverride != nil {
+		return mp.ResolveSubnetOverride(ctx, subnetExtIDOrName, cluster)
+	}
+	return subnetExtIDOrName, nil
 }

@@ -1,0 +1,748 @@
+/*
+Copyright 2026 Nutanix, Inc
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package loadbalancer
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+	metallbv1beta1 "go.universe.tf/metallb/api/v1beta1"
+	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
+	cloudprovider "k8s.io/cloud-provider"
+	cloudproviderapi "k8s.io/cloud-provider/api"
+	klog "k8s.io/klog/v2"
+	"k8s.io/utils/ptr"
+
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/internal/constants"
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/config"
+	"github.com/nutanix-cloud-native/cloud-provider-nutanix/pkg/provider/interfaces"
+)
+
+const (
+	defaultMetalLBNamespace = "metallb-system"
+	// retryAfterPending is the fixed backoff the Service controller should use
+	// when a Prism IP task is still running.
+	retryAfterPending = 5 * time.Second
+)
+
+var ipAddressPoolGVR = schema.GroupVersionResource{
+	Group:    "metallb.io",
+	Version:  "v1beta1",
+	Resource: "ipaddresspools",
+}
+
+// AutoIPAMMetalLB reserves one Prism address for a Service and announces that
+// exact address with a MetalLB /32 IPAddressPool. It does not add or remove the
+// Service cleanup finalizer; the Service controller owns that finalizer.
+type AutoIPAMMetalLB struct {
+	config config.AutoIPAMMetalLB
+	deps   Dependencies
+
+	// mu guards subnetCache, the memoised result of resolving config.Subnet to a
+	// Prism extID. Resolution is deferred to the first Service rather than done
+	// at startup so an unreachable Prism does not crash-loop the CCM.
+	mu          sync.Mutex
+	subnetCache string
+}
+
+var _ Strategy = (*AutoIPAMMetalLB)(nil)
+
+// Name returns the strategy name.
+func (*AutoIPAMMetalLB) Name() string { return StrategyAutoIPAMMetalLB }
+
+// GetLoadBalancer reports exists=true while this strategy still holds a
+// reservation for the Service. The hold is the reserved IP or the reservation
+// id written before ReserveIP. The Service controller skips
+// EnsureLoadBalancerDeleted when exists is false and then removes the cleanup
+// finalizer, so exists stays true until unreserve has finished. A Service with
+// neither annotation reports exists=false and a nil error. An error would make
+// the controller keep the finalizer without calling delete. The create path
+// does not consult this result; it calls EnsureLoadBalancer directly.
+func (*AutoIPAMMetalLB) GetLoadBalancer(_ context.Context, _ string, service *v1.Service) (*v1.LoadBalancerStatus, bool, error) {
+	ip := serviceAnnotation(service, constants.LoadBalancerIPAnnotation)
+	reservationID := serviceAnnotation(service, constants.LoadBalancerReservationIDAnnotation)
+	if ip == "" && reservationID == "" {
+		return nil, false, nil
+	}
+	if ip == "" {
+		// Reserve was recorded but the address is not persisted yet. exists=true
+		// so cleanup still calls delete and can unreserve by Service UID.
+		return &v1.LoadBalancerStatus{}, true, nil
+	}
+	return &v1.LoadBalancerStatus{
+		Ingress: []v1.LoadBalancerIngress{{IP: ip}},
+	}, true, nil
+}
+
+// EnsureLoadBalancer activates a LoadBalancer Service and returns its address.
+func (s *AutoIPAMMetalLB) EnsureLoadBalancer(ctx context.Context, _ string, service *v1.Service, _ []*v1.Node) (*v1.LoadBalancerStatus, error) {
+	if service == nil || service.Spec.Type != v1.ServiceTypeLoadBalancer {
+		return nil, fmt.Errorf("AutoIPAMMetalLB activate requires a LoadBalancer Service")
+	}
+	ip, err := s.activate(ctx, service)
+	if err != nil {
+		return nil, retryAfterError(err)
+	}
+	return &v1.LoadBalancerStatus{
+		Ingress: []v1.LoadBalancerIngress{{IP: ip}},
+	}, nil
+}
+
+// UpdateLoadBalancer returns ImplementedElsewhere. MetalLB owns host membership
+// and advertisement; this strategy does not apply the node list.
+func (*AutoIPAMMetalLB) UpdateLoadBalancer(context.Context, string, *v1.Service, []*v1.Node) error {
+	return cloudprovider.ImplementedElsewhere
+}
+
+// EnsureLoadBalancerDeleted releases the Prism address reserved for the Service
+// and then deletes the MetalLB pool that announced it. It returns nil only
+// after that release has finished, including when the address was already gone.
+//
+// Any Prism or pool error is returned (never ImplementedElsewhere) so the
+// Service controller keeps service.kubernetes.io/load-balancer-cleanup and
+// requeues EnsureLoadBalancerDeleted. Pending Prism tasks become a RetryError
+// so cleanup is restarted after a fixed delay. This method does not add or
+// remove the finalizer.
+func (s *AutoIPAMMetalLB) EnsureLoadBalancerDeleted(ctx context.Context, _ string, service *v1.Service) error {
+	if service == nil {
+		return nil
+	}
+	if _, _, err := s.clients(); err != nil {
+		return retryAfterError(err)
+	}
+
+	live, gone, err := s.serviceForDelete(ctx, service)
+	if err != nil {
+		return retryAfterError(err)
+	}
+	if live == nil {
+		return nil
+	}
+	uid, err := serviceUID(live, service)
+	if err != nil {
+		return err
+	}
+
+	reservationID := serviceAnnotation(live, constants.LoadBalancerReservationIDAnnotation)
+	ip := serviceAnnotation(live, constants.LoadBalancerIPAnnotation)
+	subnet := serviceAnnotation(live, constants.LoadBalancerSubnetAnnotation)
+
+	pool, err := s.getPool(ctx, s.metalLBNamespace(), uid)
+	if err != nil {
+		return retryAfterError(err)
+	}
+	if pool != nil && pool.Labels[constants.LoadBalancerServiceUIDLabel] == uid {
+		if reservationID == "" {
+			reservationID = pool.Labels[constants.LoadBalancerReservationIDLabel]
+		}
+		if ip == "" {
+			ip = pool.Labels[constants.LoadBalancerIPLabel]
+		}
+		if subnet == "" {
+			subnet = pool.Labels[constants.LoadBalancerSubnetLabel]
+		}
+	}
+
+	// Unreserve before deleting the pool. The pool labels are the fallback
+	// record of the reservation when the Service annotations are already gone.
+	// Deleting the pool first would drop that record if unreserve then failed.
+	if reservationID != "" || ip != "" {
+		// The recorded subnet is already an extID. Only a reservation whose record
+		// was lost falls back to the configured subnet, which may be a name.
+		if subnet == "" {
+			resolved, err := s.subnetExtID(ctx)
+			if err != nil {
+				return fmt.Errorf("cannot unreserve service %s: %w", uid, err)
+			}
+			subnet = resolved
+		}
+		reservationContext, err := serviceClientContext(s.config.ClusterUID, uid)
+		if err != nil {
+			return err
+		}
+		prism, err := s.prism()
+		if err != nil {
+			return retryAfterError(err)
+		}
+		// Unreserve releases every address under the context, so a Service that
+		// somehow holds more than one is cleaned up in a single call.
+		if err := unreserveServiceIP(ctx, prism, subnet, reservationID, reservationContext); err != nil {
+			// Keep annotations so GetLoadBalancer stays exists=true and the
+			// Service controller calls EnsureLoadBalancerDeleted again.
+			return retryAfterError(fmt.Errorf("unreserve service %s: %w", uid, err))
+		}
+	}
+
+	if poolOwnedByService(pool, uid, reservationID, subnet, ip) {
+		if err := s.deletePool(ctx, s.metalLBNamespace(), uid); err != nil {
+			return retryAfterError(err)
+		}
+	}
+
+	if !gone && hasReservationAnnotations(live) {
+		if _, err := s.updateService(ctx, live.Namespace, live.Name, clearReservationAnnotations); err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil
+			}
+			return retryAfterError(err)
+		}
+	}
+	return nil
+}
+
+// unreserveServiceIP releases every address held under reservationContext.
+//
+// The first attempt uses the request id derived from reservationID, so a retry
+// after a CCM restart resumes that task rather than starting a second one. If
+// Prism reports that id terminally failed, a fresh one is used: Prism keys the
+// unreserve itself by clientContext, so a new request id releases the same
+// addresses, and reusing a burned id would pin cleanup forever.
+func unreserveServiceIP(
+	ctx context.Context,
+	prism interfaces.Prism,
+	subnet, reservationID, reservationContext string,
+) error {
+	err := prism.UnreserveIP(ctx, subnet, unreserveRequestID(reservationID), reservationContext)
+	if err == nil || !errors.Is(err, interfaces.ErrIPReservationTerminal) {
+		return err
+	}
+	return prism.UnreserveIP(ctx, subnet, uuid.NewString(), reservationContext)
+}
+
+// retryAfterError maps pending Prism work to api.RetryError so the Service
+// controller requeues EnsureLoadBalancer / EnsureLoadBalancerDeleted after a
+// fixed delay rather than with exponential backoff. Other errors are returned
+// unchanged. Annotations are left in place by callers so GetLoadBalancer keeps
+// exists=true and delete is invoked again.
+//
+// Note this only takes effect where the controller preserves the error chain.
+// The delete branch of syncLoadBalancerIfNeeded wraps with %v, not %w, so a
+// Service deleted while it still holds the cleanup finalizer falls back to
+// exponential backoff; the ensure path and processLoadBalancerDelete honour it.
+func retryAfterError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, interfaces.ErrIPTaskPending) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled) {
+		return cloudproviderapi.NewRetryError(err.Error(), retryAfterPending)
+	}
+	return err
+}
+
+// unreserveRequestID is stable per reservation so a retry sends the same
+// NTNX-Request-Id after a CCM restart. It is keyed on the reservation id, not
+// the Service UID: Prism dedupes a repeated request id by replaying the first
+// task, so a UID-keyed id would make a later reservation of the same Service
+// report a successful release that never happened. An empty reservation id
+// yields a fresh id, which is safe because unreserve-by-context is idempotent.
+func unreserveRequestID(reservationID string) string {
+	if reservationID == "" {
+		return uuid.NewString()
+	}
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("ccm.nutanix.com/unreserve/"+reservationID)).String()
+}
+
+func (s *AutoIPAMMetalLB) activate(ctx context.Context, service *v1.Service) (string, error) {
+	if service == nil {
+		return "", fmt.Errorf("service is required")
+	}
+	if _, _, err := s.clients(); err != nil {
+		return "", err
+	}
+
+	// Resolve the configured subnet before any write. Everything persisted on the
+	// Service and the pool is the extID, so a later config change from a name to
+	// its own extID (or back) cannot orphan a reservation.
+	subnetExtID, err := s.subnetExtID(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	live, err := s.liveService(ctx, service)
+	if err != nil {
+		return "", err
+	}
+	uid, err := serviceUID(live, service)
+	if err != nil {
+		return "", err
+	}
+
+	reservationContext, err := serviceClientContext(s.config.ClusterUID, uid)
+	if err != nil {
+		return "", err
+	}
+
+	reservationID := serviceAnnotation(live, constants.LoadBalancerReservationIDAnnotation)
+	ip := serviceAnnotation(live, constants.LoadBalancerIPAnnotation)
+
+	// One list answers both questions this reconcile has for Prism: is the
+	// address we persisted still reserved, and does this context already hold an
+	// address we never managed to record? It is never cached across reconciles.
+	held, err := s.reservedForContext(ctx, reservationSubnet(live, subnetExtID), reservationContext)
+	if err != nil {
+		return "", err
+	}
+
+	// A persisted address is only trustworthy while Prism still holds it. Losing
+	// the race between unreserve and clearing the annotations (EnsureLoadBalancer
+	// Deleted clears them last) leaves an address that MetalLB would advertise
+	// with no reservation behind it, which is NCN-113131.
+	if ip != "" && !slices.Contains(held, ip) {
+		klog.Infof("service %s/%s: address %s is no longer reserved in Prism; reserving again",
+			live.Namespace, live.Name, ip)
+		live, err = s.updateService(ctx, live.Namespace, live.Name, clearReservationAnnotations)
+		if err != nil {
+			return "", fmt.Errorf("clear stale reservation: %w", err)
+		}
+		reservationID, ip = "", ""
+	}
+
+	if reservationID == "" {
+		reservationID = uuid.NewString()
+		live, err = s.updateService(ctx, live.Namespace, live.Name, func(svc *v1.Service) {
+			setServiceAnnotation(svc, constants.LoadBalancerReservationIDAnnotation, reservationID)
+		})
+		if err != nil {
+			return "", fmt.Errorf("persist reservation id: %w", err)
+		}
+	}
+
+	// Adopt before reserving. A reserve whose address we failed to persist, or
+	// whose task timed out and then succeeded, has left an address under this
+	// context that only Prism knows about; reserving again would leak it.
+	if ip == "" && len(held) > 0 {
+		ip = held[0]
+		if len(held) > 1 {
+			klog.Warningf("service %s/%s: %d addresses are reserved for this Service (%v); adopting %s. The rest are released with the Service, because unreserve releases the whole context",
+				live.Namespace, live.Name, len(held), held, ip)
+		} else {
+			klog.Infof("service %s/%s: adopting address %s already reserved for this Service",
+				live.Namespace, live.Name, ip)
+		}
+		live, err = s.updateService(ctx, live.Namespace, live.Name, func(svc *v1.Service) {
+			setServiceAnnotation(svc, constants.LoadBalancerIPAnnotation, ip)
+			setServiceAnnotation(svc, constants.LoadBalancerSubnetAnnotation, subnetExtID)
+		})
+		if err != nil {
+			return "", fmt.Errorf("persist adopted IP: %w", err)
+		}
+	}
+
+	if ip == "" {
+		prism, err := s.prism()
+		if err != nil {
+			return "", err
+		}
+		reserved, reserveErr := prism.ReserveIP(ctx, subnetExtID, reservationID, reservationContext)
+		if reserveErr != nil {
+			// Keep the reservation id on every failure, including terminal Prism
+			// errors. Clearing it made each Service-controller retry mint a new
+			// request id and POST another reserve, leaking addresses.
+			return "", reserveErr
+		}
+		ip = reserved
+		live, err = s.updateService(ctx, live.Namespace, live.Name, func(svc *v1.Service) {
+			setServiceAnnotation(svc, constants.LoadBalancerIPAnnotation, ip)
+			setServiceAnnotation(svc, constants.LoadBalancerSubnetAnnotation, subnetExtID)
+		})
+		if err != nil {
+			return "", fmt.Errorf("persist reserved IP: %w", err)
+		}
+	}
+
+	if err := s.ensurePool(ctx, s.metalLBNamespace(), uid, ip, subnetExtID, reservationID); err != nil {
+		return "", err
+	}
+
+	if _, err := s.updateService(ctx, live.Namespace, live.Name, func(svc *v1.Service) {
+		setServiceAnnotation(svc, constants.MetalLBRequestedIPsAnnotation, ip)
+	}); err != nil {
+		return "", fmt.Errorf("set MetalLB requested IP: %w", err)
+	}
+	return ip, nil
+}
+
+// subnetExtID resolves the configured subnet to a Prism extID, once per process.
+// Only a successful resolution is cached, so a transient Prism failure is
+// retried with the Service rather than remembered.
+func (s *AutoIPAMMetalLB) subnetExtID(ctx context.Context) (string, error) {
+	if s.config.Subnet == "" {
+		return "", fmt.Errorf("loadBalancer.autoIPAMMetalLB.subnet is empty; set the Prism subnet extID or name before using strategy %s", StrategyAutoIPAMMetalLB)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.subnetCache != "" {
+		return s.subnetCache, nil
+	}
+
+	prism, err := s.prism()
+	if err != nil {
+		return "", err
+	}
+	extID, err := prism.ResolveSubnet(ctx, s.config.Subnet, s.config.Cluster)
+	if err != nil {
+		return "", fmt.Errorf("resolve subnet %q: %w", s.config.Subnet, err)
+	}
+	if extID == "" {
+		return "", fmt.Errorf("resolve subnet %q: prism returned an empty extID", s.config.Subnet)
+	}
+	if extID != s.config.Subnet {
+		klog.Infof("resolved loadBalancer.autoIPAMMetalLB.subnet %q to extID %s", s.config.Subnet, extID)
+	}
+	s.subnetCache = extID
+	return extID, nil
+}
+
+// reservedForContext returns the addresses Prism holds under clientContext, in
+// a stable order so adoption picks the same address on every retry.
+func (s *AutoIPAMMetalLB) reservedForContext(ctx context.Context, subnet, clientContext string) ([]string, error) {
+	if subnet == "" {
+		return nil, fmt.Errorf("cannot read reservations for %s: prism subnet extID is empty", clientContext)
+	}
+	prism, err := s.prism()
+	if err != nil {
+		return nil, err
+	}
+	reserved, err := prism.ReservedIPs(ctx, subnet, clientContext)
+	if err != nil {
+		return nil, fmt.Errorf("read reservations for %s: %w", clientContext, err)
+	}
+	slices.Sort(reserved)
+	return reserved, nil
+}
+
+// reservationSubnet prefers the subnet the address was reserved on over the
+// configured one, so a config change cannot redirect a confirm or a release.
+func reservationSubnet(service *v1.Service, configured string) string {
+	if stored := serviceAnnotation(service, constants.LoadBalancerSubnetAnnotation); stored != "" {
+		return stored
+	}
+	return configured
+}
+
+func (s *AutoIPAMMetalLB) ensurePool(ctx context.Context, namespace, name, ip, subnet, reservationID string) error {
+	_, dynamicClient, err := s.clients()
+	if err != nil {
+		return err
+	}
+	client := dynamicClient.Resource(ipAddressPoolGVR).Namespace(namespace)
+	existingObj, err := client.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		created, err := unstructuredFromPool(newIPAddressPool(namespace, name, ip, subnet, reservationID))
+		if err != nil {
+			return fmt.Errorf("encode IPAddressPool %s/%s: %w", namespace, name, err)
+		}
+		if _, err = client.Create(ctx, created, metav1.CreateOptions{}); err != nil {
+			return fmt.Errorf("create IPAddressPool %s/%s: %w", namespace, name, err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get IPAddressPool %s/%s: %w", namespace, name, err)
+	}
+	existing, err := poolFromUnstructured(existingObj)
+	if err != nil {
+		return fmt.Errorf("decode IPAddressPool %s/%s: %w", namespace, name, err)
+	}
+	if !poolIdentityMatches(existing, name, reservationID, subnet, ip) {
+		return fmt.Errorf("IPAddressPool %s/%s exists with a different identity and was left unchanged", namespace, name)
+	}
+	changed := false
+	if !poolSpecReady(existing, ip) {
+		existing.Spec.Addresses = []string{ip + "/32"}
+		existing.Spec.AutoAssign = ptr.To(false)
+		changed = true
+	}
+	if existing.Labels[constants.LoadBalancerPoolTypeLabel] != constants.LoadBalancerPoolTypeAutoIPAMMetalLB {
+		if existing.Labels == nil {
+			existing.Labels = map[string]string{}
+		}
+		existing.Labels[constants.LoadBalancerPoolTypeLabel] = constants.LoadBalancerPoolTypeAutoIPAMMetalLB
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	updated, err := unstructuredFromPool(existing)
+	if err != nil {
+		return fmt.Errorf("encode IPAddressPool %s/%s: %w", namespace, name, err)
+	}
+	if _, err := client.Update(ctx, updated, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("update IPAddressPool %s/%s: %w", namespace, name, err)
+	}
+	return nil
+}
+
+func newIPAddressPool(namespace, name, ip, subnet, reservationID string) *metallbv1beta1.IPAddressPool {
+	return &metallbv1beta1.IPAddressPool{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: metallbv1beta1.GroupVersion.String(),
+			Kind:       "IPAddressPool",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels: map[string]string{
+				constants.LoadBalancerServiceUIDLabel:    name,
+				constants.LoadBalancerReservationIDLabel: reservationID,
+				constants.LoadBalancerSubnetLabel:        subnet,
+				constants.LoadBalancerIPLabel:            ip,
+				constants.LoadBalancerPoolTypeLabel:      constants.LoadBalancerPoolTypeAutoIPAMMetalLB,
+			},
+		},
+		Spec: metallbv1beta1.IPAddressPoolSpec{
+			Addresses:  []string{ip + "/32"},
+			AutoAssign: ptr.To(false),
+		},
+	}
+}
+
+func poolIdentityMatches(pool *metallbv1beta1.IPAddressPool, serviceUID, reservationID, subnet, ip string) bool {
+	if pool == nil || serviceUID == "" || reservationID == "" || subnet == "" || ip == "" {
+		return false
+	}
+	labels := pool.Labels
+	return labels[constants.LoadBalancerServiceUIDLabel] == serviceUID &&
+		labels[constants.LoadBalancerReservationIDLabel] == reservationID &&
+		labels[constants.LoadBalancerSubnetLabel] == subnet &&
+		labels[constants.LoadBalancerIPLabel] == ip
+}
+
+func poolSpecReady(pool *metallbv1beta1.IPAddressPool, ip string) bool {
+	if pool == nil || len(pool.Spec.Addresses) != 1 || pool.Spec.Addresses[0] != ip+"/32" {
+		return false
+	}
+	return pool.Spec.AutoAssign != nil && !*pool.Spec.AutoAssign
+}
+
+func unstructuredFromPool(pool *metallbv1beta1.IPAddressPool) (*unstructured.Unstructured, error) {
+	if pool == nil {
+		return nil, fmt.Errorf("IPAddressPool is nil")
+	}
+	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pool)
+	if err != nil {
+		return nil, err
+	}
+	u := &unstructured.Unstructured{Object: obj}
+	u.SetGroupVersionKind(metallbv1beta1.GroupVersion.WithKind("IPAddressPool"))
+	return u, nil
+}
+
+func poolFromUnstructured(obj *unstructured.Unstructured) (*metallbv1beta1.IPAddressPool, error) {
+	if obj == nil {
+		return nil, fmt.Errorf("IPAddressPool unstructured is nil")
+	}
+	pool := &metallbv1beta1.IPAddressPool{}
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, pool); err != nil {
+		return nil, err
+	}
+	return pool, nil
+}
+
+func (s *AutoIPAMMetalLB) serviceForDelete(ctx context.Context, service *v1.Service) (*v1.Service, bool, error) {
+	live, err := s.liveService(ctx, service)
+	if apierrors.IsNotFound(err) {
+		return service, true, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return live, false, nil
+}
+
+func (s *AutoIPAMMetalLB) getPool(ctx context.Context, namespace, name string) (*metallbv1beta1.IPAddressPool, error) {
+	_, dynamicClient, err := s.clients()
+	if err != nil {
+		return nil, err
+	}
+	obj, err := dynamicClient.Resource(ipAddressPoolGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get IPAddressPool %s/%s: %w", namespace, name, err)
+	}
+	pool, err := poolFromUnstructured(obj)
+	if err != nil {
+		return nil, fmt.Errorf("decode IPAddressPool %s/%s: %w", namespace, name, err)
+	}
+	return pool, nil
+}
+
+func (s *AutoIPAMMetalLB) deletePool(ctx context.Context, namespace, name string) error {
+	_, dynamicClient, err := s.clients()
+	if err != nil {
+		return err
+	}
+	err = dynamicClient.Resource(ipAddressPoolGVR).Namespace(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("delete IPAddressPool %s/%s: %w", namespace, name, err)
+	}
+	return nil
+}
+
+func poolOwnedByService(pool *metallbv1beta1.IPAddressPool, serviceUID, reservationID, subnet, ip string) bool {
+	if pool == nil || serviceUID == "" {
+		return false
+	}
+	if pool.Labels[constants.LoadBalancerServiceUIDLabel] != serviceUID {
+		return false
+	}
+	// An empty label does not contradict the reservation we are releasing.
+	// A different non-empty label means this pool belongs to someone else.
+	return labelAgrees(pool.Labels, constants.LoadBalancerReservationIDLabel, reservationID) &&
+		labelAgrees(pool.Labels, constants.LoadBalancerSubnetLabel, subnet) &&
+		labelAgrees(pool.Labels, constants.LoadBalancerIPLabel, ip)
+}
+
+func labelAgrees(labels map[string]string, key, want string) bool {
+	got := labels[key]
+	return want == "" || got == "" || got == want
+}
+
+func hasReservationAnnotations(service *v1.Service) bool {
+	return serviceAnnotation(service, constants.LoadBalancerReservationIDAnnotation) != "" ||
+		serviceAnnotation(service, constants.LoadBalancerIPAnnotation) != "" ||
+		serviceAnnotation(service, constants.LoadBalancerSubnetAnnotation) != "" ||
+		serviceAnnotation(service, constants.MetalLBRequestedIPsAnnotation) != ""
+}
+
+func clearReservationAnnotations(service *v1.Service) {
+	if service == nil || service.Annotations == nil {
+		return
+	}
+	delete(service.Annotations, constants.LoadBalancerReservationIDAnnotation)
+	delete(service.Annotations, constants.LoadBalancerIPAnnotation)
+	delete(service.Annotations, constants.LoadBalancerSubnetAnnotation)
+	delete(service.Annotations, constants.MetalLBRequestedIPsAnnotation)
+}
+
+func (s *AutoIPAMMetalLB) metalLBNamespace() string {
+	if s.config.MetalLBNamespace == "" {
+		return defaultMetalLBNamespace
+	}
+	return s.config.MetalLBNamespace
+}
+
+func (s *AutoIPAMMetalLB) clients() (kubernetes.Interface, dynamic.Interface, error) {
+	if s.deps.Kube == nil || s.deps.Dynamic == nil {
+		return nil, nil, fmt.Errorf("kubernetes clients are not initialized for strategy %s", StrategyAutoIPAMMetalLB)
+	}
+	return s.deps.Kube, s.deps.Dynamic, nil
+}
+
+func (s *AutoIPAMMetalLB) prism() (interfaces.Prism, error) {
+	if s.deps.Prism != nil {
+		return s.deps.Prism, nil
+	}
+	if s.deps.PrismClient == nil {
+		return nil, fmt.Errorf("prism client is not initialized for strategy %s", StrategyAutoIPAMMetalLB)
+	}
+	prism, err := s.deps.PrismClient.Get()
+	if err != nil {
+		return nil, fmt.Errorf("get prism client: %w", err)
+	}
+	if prism == nil {
+		return nil, fmt.Errorf("prism client is not initialized for strategy %s", StrategyAutoIPAMMetalLB)
+	}
+	return prism, nil
+}
+
+func (s *AutoIPAMMetalLB) liveService(ctx context.Context, service *v1.Service) (*v1.Service, error) {
+	kube, _, err := s.clients()
+	if err != nil {
+		return nil, err
+	}
+	live, err := kube.CoreV1().Services(service.Namespace).Get(ctx, service.Name, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("get service %s/%s: %w", service.Namespace, service.Name, err)
+	}
+	return live, nil
+}
+
+func (s *AutoIPAMMetalLB) updateService(ctx context.Context, namespace, name string, mutate func(*v1.Service)) (*v1.Service, error) {
+	kube, _, err := s.clients()
+	if err != nil {
+		return nil, err
+	}
+	var lastErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		current, err := kube.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("get service %s/%s: %w", namespace, name, err)
+		}
+		mutate(current)
+		updated, err := kube.CoreV1().Services(namespace).Update(ctx, current, metav1.UpdateOptions{})
+		if err == nil {
+			return updated, nil
+		}
+		lastErr = err
+		if !apierrors.IsConflict(err) {
+			return nil, fmt.Errorf("update service %s/%s: %w", namespace, name, err)
+		}
+	}
+	return nil, fmt.Errorf("update service %s/%s: %w", namespace, name, lastErr)
+}
+
+func serviceUID(live, requested *v1.Service) (string, error) {
+	uid := ""
+	if live != nil {
+		uid = string(live.UID)
+	}
+	if uid == "" && requested != nil {
+		uid = string(requested.UID)
+	}
+	if uid == "" {
+		return "", fmt.Errorf("service UID is required for strategy %s", StrategyAutoIPAMMetalLB)
+	}
+	if requested != nil && requested.UID != "" && live != nil && live.UID != "" && requested.UID != live.UID {
+		return "", fmt.Errorf("service UID %q does not match %q", requested.UID, live.UID)
+	}
+	return uid, nil
+}
+
+func serviceAnnotation(service *v1.Service, key string) string {
+	if service == nil || service.Annotations == nil {
+		return ""
+	}
+	return service.Annotations[key]
+}
+
+func setServiceAnnotation(service *v1.Service, key, value string) {
+	if service.Annotations == nil {
+		service.Annotations = map[string]string{}
+	}
+	service.Annotations[key] = value
+}

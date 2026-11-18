@@ -96,6 +96,10 @@ variables:
   NUTANIX_NON_PROJECT_SCOPED_MACHINE_TEMPLATE_IMAGE_NAME: "rockylinux-9-kube-v1.37.0.qcow2"
   NUTANIX_PROJECT_SCOPED_MACHINE_TEMPLATE_IMAGE_NAME: "rockylinux-9-kube-v1.37.0.qcow2"
   NUTANIX_SUBNET_NAME: ""
+  # Empty defaults keep non-LB specs working after the CAPX templates gained a
+  # loadBalancer block. LB specs override these via ClusterctlVariables.
+  NUTANIX_SUBNET_EXTID: ""
+  NUTANIX_LOADBALANCER_STRATEGY: "None"
   EXP_CLUSTER_RESOURCE_SET: "true"
   CCM_REPO: "ghcr.io/nutanix-cloud-native/cloud-provider-nutanix/controller"
   CCM_TAG: "latest"

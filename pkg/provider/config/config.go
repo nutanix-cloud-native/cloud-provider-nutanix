@@ -30,6 +30,40 @@ type Config struct {
 	TopologyDiscovery    TopologyDiscovery                    `json:"topologyDiscovery"`
 	EnableCustomLabeling bool                                 `json:"enableCustomLabeling"`
 	IgnoredNodeIPs       []string                             `json:"ignoredNodeIPs,omitempty"`
+	LoadBalancer         LoadBalancer                         `json:"loadBalancer,omitempty"`
+}
+
+// LoadBalancer holds configuration for the CCM Service LoadBalancer controller.
+type LoadBalancer struct {
+	// DefaultStrategy is the LoadBalancer strategy applied to a Service that
+	// does not carry the strategy override annotation. When empty it defaults
+	// to the "None" (do-nothing) strategy, preserving legacy static-pool
+	// behaviour where MetalLB owns allocation and advertisement.
+	DefaultStrategy string `json:"defaultStrategy,omitempty"`
+	// AutoIPAMMetalLB configures the AutoIPAMMetalLB strategy. None does not use it.
+	AutoIPAMMetalLB AutoIPAMMetalLB `json:"autoIPAMMetalLB,omitempty"`
+}
+
+// AutoIPAMMetalLB configures reservation of one Prism address per Service and
+// the MetalLB pool that announces it.
+type AutoIPAMMetalLB struct {
+	// Subnet is the Prism subnet addresses are reserved from, either an extID or
+	// a subnet name. Empty makes activation fail before any Prism or MetalLB
+	// write.
+	Subnet string `json:"subnet,omitempty"`
+	// Cluster narrows a Subnet given by name to one Prism Element, by cluster
+	// name or extID. It is only consulted when Subnet is a name, and only for
+	// subnets that declare a cluster.
+	Cluster string `json:"cluster,omitempty"`
+	// ClusterUID is the UID of this workload cluster's CAPI Cluster object. It
+	// is half of the reservation identity Prism stores, which is what lets the
+	// management cluster release this cluster's addresses after the workload
+	// cluster is gone. The CCM cannot derive it, so activation fails when it is
+	// empty.
+	ClusterUID string `json:"clusterUID,omitempty"`
+	// MetalLBNamespace is the namespace of the per-Service IPAddressPool.
+	// Empty defaults to metallb-system.
+	MetalLBNamespace string `json:"metalLBNamespace,omitempty"`
 }
 
 type TopologyDiscovery struct {

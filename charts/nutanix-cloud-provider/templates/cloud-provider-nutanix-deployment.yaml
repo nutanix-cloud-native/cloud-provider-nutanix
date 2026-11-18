@@ -58,6 +58,11 @@ spec:
             - "--leader-elect=true"
             - "--cloud-config=/etc/cloud/nutanix_config.json"
             - "--tls-cipher-suites={{ .Values.tlsCipherSuites }}"
+{{- if not .Values.loadBalancer.enabled }}
+            # Disable the Service (LoadBalancer) controller at runtime; leaves IP
+            # allocation and advertisement entirely to MetalLB (legacy behaviour).
+            - "--controllers=*,-service"
+{{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
